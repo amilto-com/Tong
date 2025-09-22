@@ -57,3 +57,6 @@ htmlcov/
 # Rust
 target/
 rust/**/target/
+
+# Windows runtime binaries (avoid committing DLLs)
+SDL3.dll

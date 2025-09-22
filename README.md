@@ -87,6 +87,21 @@ cargo build --release
 
 # After running setup.sh --global or setup.ps1 -Global
 tong ../../examples/hello.tong
+ 
+Windows (SDL3 example):
+- The SDL3 backend is optional. To run the SDL Pong example with a real window, build with the feature and ensure `SDL3.dll` is available at runtime.
+- Recommended options:
+    - Place `SDL3.dll` next to the built binary (e.g., `rust/tong/target/debug/`), or
+    - Put `SDL3.dll` in a directory on your PATH.
+- We do not commit `SDL3.dll` to the repository; see `.gitignore`.
+
+Example:
+```powershell
+# Build with SDL3 backend
+cargo build --features sdl3
+
+# Run the Pong example (ensure SDL3.dll is discoverable)
+.\target\debug\tong.exe ..\..\examples\modules\sdl\pong.tong
 ```
 
 ## Language Examples
