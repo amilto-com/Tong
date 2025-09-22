@@ -718,32 +718,34 @@ impl Env {
     fn call_sdl_builtin(&mut self, name: &str, args: Vec<Expr>) -> Result<Value> {
         #[cfg(feature = "sdl3")]
         {
-            return self.call_sdl_builtin_real(name, args);
+            self.call_sdl_builtin_real(name, args)
         }
         #[cfg(not(feature = "sdl3"))]
-        match name {
-            "sdl_init" => Ok(Value::Int(0)),
-            "sdl_create_window" => Ok(Value::Int(1)),
-            "sdl_create_renderer" => Ok(Value::Int(1)),
-            "sdl_set_draw_color" => Ok(Value::Int(0)),
-            "sdl_clear" => Ok(Value::Int(0)),
-            "sdl_fill_rect" => Ok(Value::Int(0)),
-            "sdl_present" => Ok(Value::Int(0)),
-            "sdl_delay" => {
-                // Simulate ~60 FPS by increasing frame count; no sleeping for CI speed
-                let _ = args; // ignore actual ms
-                self.sdl_frame += 1;
-                Ok(Value::Int(0))
+        {
+            match name {
+                "sdl_init" => Ok(Value::Int(0)),
+                "sdl_create_window" => Ok(Value::Int(1)),
+                "sdl_create_renderer" => Ok(Value::Int(1)),
+                "sdl_set_draw_color" => Ok(Value::Int(0)),
+                "sdl_clear" => Ok(Value::Int(0)),
+                "sdl_fill_rect" => Ok(Value::Int(0)),
+                "sdl_present" => Ok(Value::Int(0)),
+                "sdl_delay" => {
+                    // Simulate ~60 FPS by increasing frame count; no sleeping for CI speed
+                    let _ = args; // ignore actual ms
+                    self.sdl_frame += 1;
+                    Ok(Value::Int(0))
+                }
+                "sdl_poll_quit" => {
+                    let quit = self.sdl_frame >= 300; // auto-quit after ~300 frames
+                    Ok(Value::Bool(quit))
+                }
+                "sdl_key_down" => Ok(Value::Bool(false)),
+                "sdl_destroy_renderer" => Ok(Value::Int(0)),
+                "sdl_destroy_window" => Ok(Value::Int(0)),
+                "sdl_quit" => Ok(Value::Int(0)),
+                other => bail!("unknown SDL builtin {}", other),
             }
-            "sdl_poll_quit" => {
-                let quit = self.sdl_frame >= 300; // auto-quit after ~300 frames
-                Ok(Value::Bool(quit))
-            }
-            "sdl_key_down" => Ok(Value::Bool(false)),
-            "sdl_destroy_renderer" => Ok(Value::Int(0)),
-            "sdl_destroy_window" => Ok(Value::Int(0)),
-            "sdl_quit" => Ok(Value::Int(0)),
-            other => bail!("unknown SDL builtin {}", other),
         }
     }
 }
@@ -786,7 +788,7 @@ impl Env {
             }
             "sdl_create_window" => {
                 // evaluate arguments first to avoid borrow conflicts
-                let title = match args.get(0).map(|e| self.eval_expr(e.clone())) {
+                let title = match args.first().map(|e| self.eval_expr(e.clone())) {
                     Some(Ok(Value::Str(s))) => s,
                     _ => "TONG".to_string(),
                 };
@@ -877,7 +879,7 @@ impl Env {
                 Ok(Value::Int(0))
             }
             "sdl_delay" => {
-                let ms = match args.get(0).map(|e| self.eval_expr(e.clone())) {
+                let ms = match args.first().map(|e| self.eval_expr(e.clone())) {
                     Some(Ok(Value::Int(i))) => i,
                     _ => 16,
                 };
@@ -896,7 +898,7 @@ impl Env {
                 Ok(Value::Bool(quit))
             }
             "sdl_key_down" => {
-                let code = match args.get(0).map(|e| self.eval_expr(e.clone())) {
+                let code = match args.first().map(|e| self.eval_expr(e.clone())) {
                     Some(Ok(Value::Int(i))) => i,
                     _ => 0,
                 };
