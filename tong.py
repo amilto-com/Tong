@@ -8,19 +8,28 @@ import sys
 import argparse
 import os
 from pathlib import Path
+from typing import Optional
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.lexer import TongLexer
-from src.parser import TongParser
+from src.parser import TongParser, ParseError
 from src.interpreter import TongInterpreter
+from src.ast_dump import ast_to_dict
+import json
 from src.repl import TongREPL
 
-def compile_file(filename: str, output: str = None) -> None:
+def compile_file(
+    filename: str,
+    output: Optional[str] = None,
+    print_ast: bool = False,
+    save_ast: Optional[str] = None,
+    compile_only: bool = False,
+) -> None:
     """Compile a TONG source file"""
     try:
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding='utf-8') as f:
             source = f.read()
         
         print(f"Compiling {filename}...")
@@ -34,18 +43,34 @@ def compile_file(filename: str, output: str = None) -> None:
         parser = TongParser(tokens)
         program = parser.parse()
         print(f"  Parsing: {len(program.statements)} statements")
+
+        # Optionally print or save the AST (JSON)
+        if print_ast or save_ast:
+            ast_json = json.dumps(ast_to_dict(program), indent=2)
+            if print_ast:
+                print("=== AST (JSON) ===")
+                print(ast_json)
+            if save_ast:
+                out_path = Path(save_ast)
+                out_path.write_text(ast_json, encoding="utf-8")
+                print(f"  AST saved to {out_path}")
         
+        if compile_only:
+            # In a real compiler, we'd emit code to 'output' here if provided
+            if output:
+                print(f"  (compile-only) No code emission implemented yet. Ignoring output='{output}'.")
+            return
+
         # For now, just interpret (real compiler would generate machine code)
         interpreter = TongInterpreter()
         print("  Executing...")
         interpreter.interpret(program)
-        
         print(f"Successfully executed {filename}")
         
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found")
         sys.exit(1)
-    except Exception as e:
+    except (ParseError, SyntaxError, ValueError, RuntimeError, OSError) as e:
         print(f"Error compiling {filename}: {e}")
         sys.exit(1)
 
@@ -80,6 +105,8 @@ TONG Language Features:
     parser.add_argument('-c', '--compile', action='store_true', 
                        help='Compile only (don\'t execute)')
     parser.add_argument('-o', '--output', help='Output file name')
+    parser.add_argument('--print-ast', action='store_true', help='Print the parsed AST as JSON and exit')
+    parser.add_argument('--save-ast', metavar='FILE', help='Save the parsed AST as JSON to FILE')
     parser.add_argument('--version', action='version', version='TONG 1.0.0')
     
     args = parser.parse_args()
@@ -89,7 +116,13 @@ TONG Language Features:
     print()
     
     if args.file:
-        compile_file(args.file, args.output)
+        compile_file(
+            filename=args.file,
+            output=args.output,
+            print_ast=args.print_ast,
+            save_ast=args.save_ast,
+            compile_only=args.compile,
+        )
     else:
         run_repl()
 
