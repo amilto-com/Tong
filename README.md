@@ -1,6 +1,24 @@
 # TONG Programming Language
 
-The ultimate programming language designed for high-performance parallel and distributed computing across heterogeneous environments (CPU/GPU/NPU/FPGA).
+<p align="center">
+    <img src="images/TONG_a35c8343-4727-4443-bdaf-7ab3e9d3661d.jpg" alt="TONG Logo" width="320" />
+</p>
+
+The ultimate programming language designed for high‑performance parallel and distributed computing across heterogeneous environments (CPU/GPU/NPU/FPGA).
+
+Authored by William Gacquer — AMILTO
+
+Contributions welcome! See “Contributing” below.
+
+## Why the name “TONG”?
+
+We wanted a name that’s short, fun, and nerd‑accurate:
+
+- It sounds like “tongue,” which you use for speaking a language — perfect for a programming language. Linguists, you’re welcome.
+- In French, “une bascule (T flip‑flop)” is colloquially referred to as a “T(ong)” style flip‑flop — the simplest building block of memory in digital hardware. TONG pays homage to that first tiny bit of “remembering” your computer ever did.
+- It’s easy to say, hard to forget, and looks great in monospace.
+
+Conclusion: TONG is a language that speaks performance and remembers what matters.
 
 ## Features
 
@@ -11,10 +29,10 @@ The ultimate programming language designed for high-performance parallel and dis
 - JIT compilation in REPL mode
 
 ⚡ **Heterogeneous Computing**
-- Native support for CPU/GPU/NPU/FPGA execution
-- Automatic workload distribution
-- GPU kernel compilation
-- Distributed computing primitives
+- Clear path toward CPU/GPU/NPU/FPGA execution
+- Automatic workload distribution (progressive rollout)
+- GPU kernel compilation (design underway)
+- Distributed computing primitives (incremental)
 
 🔧 **Developer Experience**
 - Interactive REPL with hot compilation
@@ -23,35 +41,57 @@ The ultimate programming language designed for high-performance parallel and dis
 - Built-in parallel algorithms
 
 🌐 **Compilation Targets**
-- Native machine code (x86_64, ARM64, RISC-V)
-- WebAssembly (WASM)
-- GPU shaders (CUDA, OpenCL, Metal)
-- FPGA HDL (planned)
+- Interpreter today, with compilation paths on the roadmap:
+    - Native (x86_64/ARM64/RISC‑V)
+    - WebAssembly (WASM)
+    - GPU shaders (CUDA/OpenCL/Metal)
+    - FPGA HDL
 
 ## Quick Start
 
 ### Installation
 
+Clone the repository:
+
 ```bash
-# Clone the repository
 git clone https://github.com/amilto-com/Tong.git
 cd Tong
-
-# Make the main script executable
-chmod +x tong.py
 ```
+
+Create a Python virtual environment (recommended) and install deps:
+
+```bash
+python -m venv .venv
+./.venv/bin/pip install -r requirements.txt   # macOS/Linux
+# or on Windows PowerShell
+.\.venv\Scripts\pip.exe install -r requirements.txt
+```
+
+Optional: add a convenient “tong” command to your PATH
+
+- macOS/Linux:
+    ```bash
+    ./setup.sh
+    ```
+- Windows (PowerShell, no admin required):
+    ```powershell
+    ./setup.ps1 -Global
+    ```
 
 ### Running TONG
 
 ```bash
 # Start interactive REPL
-./tong.py
+python tong.py
 
 # Run a TONG program
-./tong.py examples/hello.tong
+python tong.py examples/hello.tong
+
+# Run all examples
+python scripts/run_examples.py
 
 # Show help
-./tong.py --help
+python tong.py --help
 ```
 
 ## Language Examples
@@ -68,12 +108,8 @@ main()
 
 ### Variables and Functions
 ```tong
-// Immutable by default
 let x = 42
 let name = "TONG"
-
-// Mutable variables
-var counter = 0
 
 // Functions with type inference
 fn add(a, b) {
@@ -98,7 +134,7 @@ print("Length:", len(numbers))
 print("Doubled:", map(numbers, |x| x * 2))  // Parallel map
 ```
 
-### Parallel Computing
+### Parallel Computing (today and tomorrow)
 ```tong
 // Explicit parallel blocks
 parallel {
@@ -124,7 +160,7 @@ distributed fn process_big_data(data) {
 Start the interactive REPL:
 
 ```bash
-./tong.py
+python tong.py
 ```
 
 REPL Commands:
@@ -186,6 +222,10 @@ The `examples/` directory contains demonstration programs:
 - `arrays.tong` - Array processing and built-ins
 - `parallel.tong` - Parallel computing examples
 - `advanced.tong` - Advanced language features
+- `rosetta/` - A curated set of Rosetta Code tasks implemented in TONG (FizzBuzz, Fibonacci, GCD, Factorial, Collatz, Prime Factors, 100 Doors, Towers of Hanoi, N‑body, and more). Try them with:
+    ```bash
+    python scripts/run_examples.py
+    ```
 
 ## Performance
 
@@ -218,6 +258,27 @@ TONG automatically optimizes code for performance:
 - Package management
 - IDE integration
 
+## Community & Contributing
+
+Author: William Gacquer  
+Company: AMILTO
+
+We’re building TONG in the open — jump in!
+
+Ways to contribute:
+- Try the examples and report issues or ideas
+- Tackle “good first issues” in the tracker
+- Improve docs and examples (especially Rosetta tasks!)
+- Add tests or small runtime/library utilities
+
+Typical workflow:
+1. Fork the repo and create a feature branch
+2. Make focused, incremental changes (small PRs are best)
+3. Add/adjust examples or tests as needed
+4. Open a pull request and tell us what you improved
+
+No contribution is too small — even typo fixes are appreciated. If you’re unsure where to start, open a GitHub Discussion or Issue and say hello.
+
 ## Contributing
 
 TONG is designed to be the ultimate programming language. Contributions are welcome!
@@ -232,18 +293,6 @@ TONG is designed to be the ultimate programming language. Contributions are welc
 
 MIT License - see LICENSE file for details.
 
-## Why TONG?
-
-TONG combines the best features from all major programming languages:
-
-- **Performance** like C/C++ and Rust
-- **Simplicity** like Python and Go  
-- **Expressiveness** like Haskell and ML
-- **Concurrency** like Erlang and Go
-- **Safety** like Rust and Swift
-
-TONG is designed for the future of computing where heterogeneous architectures (CPU/GPU/NPU/FPGA) work together seamlessly.
-
 ---
 
-*TONG - The Ultimate Programming Language for Heterogeneous Computing*
+TONG — The Ultimate Programming Language for Heterogeneous Computing
