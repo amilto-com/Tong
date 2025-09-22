@@ -1,0 +1,50 @@
+// Mathematical Computing Example
+// Showcases TONG's mathematical capabilities
+
+fn factorial(n) {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+fn power(base, exponent) {
+    if exponent == 0 {
+        return 1
+    }
+    return base * power(base, exponent - 1)
+}
+
+fn mathematical_operations() {
+    print("=== TONG Mathematical Computing ===")
+    
+    // Basic arithmetic
+    let a = 42
+    let b = 17
+    
+    print("a =", a, "b =", b)
+    print("a + b =", a + b)
+    print("a - b =", a - b)
+    print("a * b =", a * b)
+    print("a / b =", a / b)
+    print("a % b =", a % b)
+    
+    // Functions (using smaller numbers to avoid recursion issues)
+    print("factorial(5) =", factorial(5))
+    print("power(2, 8) =", power(2, 8))
+    
+    // Array operations
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    print("Numbers:", numbers)
+    print("Sum:", sum(numbers))
+    print("Length:", len(numbers))
+    
+    // Higher-order functions
+    let squares = map(numbers, |x| x * x)
+    let cubes = map(numbers, |x| x * x * x)
+    
+    print("Squares:", squares)
+    print("Cubes:", cubes)
+}
+
+mathematical_operations()

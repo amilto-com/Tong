@@ -1,0 +1,52 @@
+// Parallel Computing Example in TONG
+// Demonstrates automatic parallelization
+
+fn fibonacci(n) {
+    if n <= 1 {
+        return n
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+fn parallel_fibonacci_demo() {
+    let numbers = [30, 31, 32, 33, 34, 35]
+    
+    print("Computing Fibonacci numbers in parallel...")
+    
+    // Map automatically parallelizes for large datasets
+    let results = map(numbers, fibonacci)
+    
+    print("Results:", results)
+}
+
+fn parallel_array_processing() {
+    let large_array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    
+    // Automatic parallelization for mathematical operations
+    let doubled = map(large_array, |x| x * 2)
+    let squared = map(large_array, |x| x * x)
+    
+    print("Original:", large_array)
+    print("Doubled:", doubled)
+    print("Squared:", squared)
+    
+    // Parallel sum automatically detects large arrays
+    let total = sum(large_array)
+    print("Sum:", total)
+}
+
+fn manual_parallel_block() {
+    // Explicit parallel execution
+    parallel {
+        let result1 = fibonacci(30)
+        let result2 = fibonacci(31)
+        let result3 = fibonacci(32)
+        
+        print("Parallel results:", result1, result2, result3)
+    }
+}
+
+// Run examples
+parallel_fibonacci_demo()
+parallel_array_processing()
+manual_parallel_block()
