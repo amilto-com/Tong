@@ -480,10 +480,17 @@ class TongParser:
         elif self.match(TokenType.LEFT_BRACKET):
             self.advance()
             elements = []
-            while not self.match(TokenType.RIGHT_BRACKET):
+            # Allow newlines between elements
+            while True:
+                self.skip_newlines()
+                if self.match(TokenType.RIGHT_BRACKET) or self.current_token.type == TokenType.EOF:
+                    break
                 if elements:
-                    self.consume(TokenType.COMMA)
+                    self.consume(TokenType.COMMA, "Expected ',' between array elements")
+                    self.skip_newlines()
                 elements.append(self.parse_expression())
+                # After an element, tolerate optional trailing commas/newlines before next or closing
+                self.skip_newlines()
             self.consume(TokenType.RIGHT_BRACKET)
             return ArrayLiteral(elements)
         

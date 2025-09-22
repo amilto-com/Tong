@@ -383,6 +383,9 @@ class TongInterpreter:
         elif isinstance(expr, AwaitExpression):
             return self._execute_await(expr, env)
         
+        elif isinstance(expr, Lambda):
+            return self._create_lambda(expr, env)
+        
         else:
             raise RuntimeError(f"Unknown expression type: {type(expr)}")
     
@@ -418,6 +421,23 @@ class TongInterpreter:
             raise RuntimeError(f"Cannot call non-function value: {func.type_name}")
         
         return func.value(*args)
+
+    def _create_lambda(self, lam: Lambda, closure_env: Environment) -> TongFunction:
+        """Create a function value from a lambda expression, capturing the environment"""
+        def lambda_func(*args: TongValue) -> TongValue:
+            func_env = Environment(closure_env)
+            # Bind parameters by position
+            for i, param in enumerate(lam.parameters):
+                if i < len(args):
+                    func_env.define(param.name, args[i])
+                else:
+                    # No defaults for lambdas in current spec
+                    raise RuntimeError(f"Missing argument for parameter {param.name}")
+            # Evaluate lambda body expression
+            return self.evaluate_expression(lam.body, func_env)
+        
+        sig = ", ".join(p.name for p in lam.parameters)
+        return TongFunction(lambda_func, f"lambda({sig})")
     
     def _execute_parallel_block(self, block: ParallelBlock, env: Environment) -> TongValue:
         """Execute a parallel block"""

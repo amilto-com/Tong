@@ -2,16 +2,21 @@
 TONG Language REPL (Read-Eval-Print Loop)
 Interactive programming environment with hot compilation
 """
+from typing import List
 
-import sys
-import traceback
-from typing import Optional, List
-import readline  # For command history and editing
+# Readline is not available on Windows; try optional fallback
+try:
+    import readline as _readline  # type: ignore[import-not-found]
+except ImportError:
+    try:
+        import pyreadline3 as _readline  # type: ignore[import-not-found]
+    except ImportError:
+        _readline = None  # type: ignore[assignment]
 
 from src.lexer import TongLexer, Token, TokenType
 from src.parser import TongParser, ParseError
-from src.interpreter import TongInterpreter, RuntimeError, Environment
-from src.ast_nodes import *
+from src.interpreter import TongInterpreter, RuntimeError as TongRuntimeError
+from src.ast_nodes import ExpressionStatement
 
 class TongREPL:
     """Interactive REPL for TONG programming language"""
@@ -22,12 +27,16 @@ class TongREPL:
         self.multiline_buffer = []
         self.in_multiline = False
         
-        # Setup readline for better input handling
-        try:
-            readline.parse_and_bind('tab: complete')
-            readline.parse_and_bind('set editing-mode emacs')
-        except:
-            pass  # readline not available on all systems
+        # Setup readline for better input handling (if available)
+        if _readline is not None:
+            parse_and_bind = getattr(_readline, 'parse_and_bind', None)
+            if callable(parse_and_bind):
+                try:
+                    parse_and_bind('tab: complete')
+                    parse_and_bind('set editing-mode emacs')
+                except (RuntimeError, OSError):
+                    # Ignore if platform doesn't support these bindings
+                    pass
     
     def run(self):
         """Start the REPL"""
@@ -88,10 +97,7 @@ class TongREPL:
             except EOFError:
                 print("\nGoodbye!")
                 break
-            except Exception as e:
-                print(f"Error: {e}")
-                self.multiline_buffer.clear()
-                self.in_multiline = False
+            # Let unexpected exceptions propagate to avoid masking errors
     
     def needs_multiline(self, line: str) -> bool:
         """Check if line needs multiline input"""
@@ -142,11 +148,8 @@ class TongREPL:
         
         except ParseError as e:
             print(f"Parse error: {e}")
-        except RuntimeError as e:
+        except TongRuntimeError as e:
             print(f"Runtime error: {e}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            traceback.print_exc()
     
     def execute_multiline(self) -> None:
         """Execute multiline code"""
@@ -167,11 +170,8 @@ class TongREPL:
             
         except ParseError as e:
             print(f"Parse error: {e}")
-        except RuntimeError as e:
+        except TongRuntimeError as e:
             print(f"Runtime error: {e}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            traceback.print_exc()
         finally:
             self.multiline_buffer.clear()
             self.in_multiline = False
@@ -205,7 +205,7 @@ class TongREPL:
         print("""
 TONG REPL Commands:
   help     - Show this help message
-  exit     - Exit the REPL  
+  exit     - Exit the REPL
   quit     - Exit the REPL
   clear    - Clear all variables and functions
   vars     - Show all defined variables
@@ -229,7 +229,7 @@ Examples:
   >>> let numbers = [1, 2, 3, 4, 5]
   >>> sum(numbers)
   => 15
-  
+
   >>> fn square(x) { x * x }
   >>> map(numbers, square)
   => [1, 4, 9, 16, 25]
