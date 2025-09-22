@@ -1,6 +1,10 @@
 """
-TONG Language Lexer
-Tokenizes TONG source code into a stream of tokens
+Deprecated module: use the Rust implementation in rust/tong.
+"""
+
+raise RuntimeError("TONG Python lexer retired; use the Rust CLI (see README.md)")
+"""
+DEPRECATED: Python lexer is retired. Use the Rust implementation in rust/tong.
 """
 
 import re
@@ -9,16 +13,17 @@ from dataclasses import dataclass
 from typing import List, Optional, Iterator
 
 class TokenType(Enum):
+    """Enumeration of all token types in the TONG language."""
     # Literals
     INTEGER = auto()
     FLOAT = auto()
     STRING = auto()
     CHAR = auto()
     BOOLEAN = auto()
-    
+
     # Identifiers and keywords
     IDENTIFIER = auto()
-    
+
     # Keywords
     LET = auto()
     VAR = auto()
@@ -43,7 +48,7 @@ class TokenType(Enum):
     FALSE = auto()
     NONE = auto()
     SOME = auto()
-    
+
     # Operators
     PLUS = auto()
     MINUS = auto()
@@ -56,7 +61,7 @@ class TokenType(Enum):
     MINUS_ASSIGN = auto()
     MULTIPLY_ASSIGN = auto()
     DIVIDE_ASSIGN = auto()
-    
+
     # Comparison
     EQUAL = auto()
     NOT_EQUAL = auto()
@@ -64,12 +69,12 @@ class TokenType(Enum):
     LESS_EQUAL = auto()
     GREATER_THAN = auto()
     GREATER_EQUAL = auto()
-    
+
     # Logical
     AND = auto()
     OR = auto()
     NOT = auto()
-    
+
     # Punctuation
     SEMICOLON = auto()
     COMMA = auto()
@@ -81,7 +86,7 @@ class TokenType(Enum):
     FAT_ARROW = auto()
     PIPE = auto()
     AMPERSAND = auto()
-    
+
     # Brackets
     LEFT_PAREN = auto()
     RIGHT_PAREN = auto()
@@ -89,7 +94,7 @@ class TokenType(Enum):
     RIGHT_BRACE = auto()
     LEFT_BRACKET = auto()
     RIGHT_BRACKET = auto()
-    
+
     # Special
     NEWLINE = auto()
     EOF = auto()
@@ -97,6 +102,7 @@ class TokenType(Enum):
 
 @dataclass
 class Token:
+    """Represents a single token in the TONG language."""
     type: TokenType
     value: str
     line: int
@@ -104,7 +110,7 @@ class Token:
 
 class TongLexer:
     """Lexical analyzer for TONG programming language"""
-    
+
     KEYWORDS = {
         'let': TokenType.LET,
         'var': TokenType.VAR,
@@ -130,23 +136,23 @@ class TongLexer:
         'None': TokenType.NONE,
         'Some': TokenType.SOME,
     }
-    
+
     def __init__(self, source: str):
         self.source = source
         self.pos = 0
         self.line = 1
         self.column = 1
         self.tokens = []
-    
+
     def current_char(self) -> Optional[str]:
         """Get current character or None if at end"""
         return self.source[self.pos] if self.pos < len(self.source) else None
-    
+
     def peek_char(self, offset: int = 1) -> Optional[str]:
         """Peek ahead at character"""
         peek_pos = self.pos + offset
         return self.source[peek_pos] if peek_pos < len(self.source) else None
-    
+
     def advance(self) -> None:
         """Move to next character"""
         if self.pos < len(self.source) and self.source[self.pos] == '\n':
@@ -155,36 +161,36 @@ class TongLexer:
         else:
             self.column += 1
         self.pos += 1
-    
+
     def skip_whitespace(self) -> None:
         """Skip whitespace except newlines"""
         while self.current_char() and self.current_char() in ' \t\r':
             self.advance()
-    
+
     def read_number(self) -> Token:
         """Read integer or float literal"""
         start_pos = self.pos
         start_column = self.column
-        
+
         # Read digits
         while self.current_char() and self.current_char().isdigit():
             self.advance()
-        
+
         # Check for decimal point
         if self.current_char() == '.' and self.peek_char() and self.peek_char().isdigit():
             self.advance()  # consume '.'
             while self.current_char() and self.current_char().isdigit():
                 self.advance()
             return Token(TokenType.FLOAT, self.source[start_pos:self.pos], self.line, start_column)
-        
+
         return Token(TokenType.INTEGER, self.source[start_pos:self.pos], self.line, start_column)
-    
+
     def read_string(self) -> Token:
         """Read string literal"""
         start_column = self.column
         quote_char = self.current_char()
         self.advance()  # consume opening quote
-        
+
         value = ""
         while self.current_char() and self.current_char() != quote_char:
             if self.current_char() == '\\':
@@ -207,47 +213,47 @@ class TongLexer:
             else:
                 value += self.current_char()
                 self.advance()
-        
+
         if self.current_char() == quote_char:
             self.advance()  # consume closing quote
-        
+
         return Token(TokenType.STRING, value, self.line, start_column)
-    
+
     def read_identifier(self) -> Token:
         """Read identifier or keyword"""
         start_pos = self.pos
         start_column = self.column
-        
-        while (self.current_char() and 
+
+        while (self.current_char() and
                (self.current_char().isalnum() or self.current_char() in '_')):
             self.advance()
-        
+
         value = self.source[start_pos:self.pos]
         token_type = self.KEYWORDS.get(value, TokenType.IDENTIFIER)
-        
+
         return Token(token_type, value, self.line, start_column)
-    
+
     def tokenize(self) -> List[Token]:
         """Tokenize the entire source code"""
         while self.pos < len(self.source):
             self.skip_whitespace()
-            
+
             char = self.current_char()
             if not char:
                 break
-            
+
             # Numbers
             if char.isdigit():
                 self.tokens.append(self.read_number())
-            
+
             # Strings
             elif char in '"\'':
                 self.tokens.append(self.read_string())
-            
+
             # Identifiers and keywords
             elif char.isalpha() or char == '_':
                 self.tokens.append(self.read_identifier())
-            
+
             # Comments
             elif char == '/' and self.peek_char() == '/':
                 # Line comment - skip to end of line
@@ -265,7 +271,7 @@ class TongLexer:
                         break
                     self.advance()
                 continue
-            
+
             # Two-character operators
             elif char == '=' and self.peek_char() == '=':
                 self.tokens.append(Token(TokenType.EQUAL, '==', self.line, self.column))
@@ -295,7 +301,7 @@ class TongLexer:
                 self.tokens.append(Token(TokenType.DOUBLE_COLON, '::', self.line, self.column))
                 self.advance()
                 self.advance()
-            
+
             # Single-character tokens
             elif char == '+':
                 self.tokens.append(Token(TokenType.PLUS, char, self.line, self.column))
@@ -369,6 +375,6 @@ class TongLexer:
             else:
                 # Unknown character, skip
                 self.advance()
-        
+
         self.tokens.append(Token(TokenType.EOF, '', self.line, self.column))
         return self.tokens

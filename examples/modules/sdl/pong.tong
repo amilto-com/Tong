@@ -1,0 +1,140 @@
+// SDL Pong example using TONG's module system
+
+fn main() {
+  let sdl = import("sdl")
+  sdl.init()
+  let win = sdl.create_window("TONG Pong - Press ESC or Q to quit", 800, 600)
+  let ren = sdl.create_renderer(win)
+
+  print("Controls: W/S (left paddle), UP/DOWN (right paddle), ESC/Q (quit)")
+  print("Close window button should also work")
+
+  // Game state
+  let ball_x = 400
+  let ball_y = 300
+  let ball_vx = 5
+  let ball_vy = 4
+  let ball_size = 12
+  let pw = 15
+  let ph = 80
+  let p1_y = 260
+  let p2_y = 260
+  let score1 = 0
+  let score2 = 0
+
+  let running = true
+  while running {
+    // Handle quit events - check window close button first
+    if sdl.poll_quit() {
+      running = false
+    }
+    
+    // Also allow ESC or Q to quit
+    if sdl.key_down(sdl.K_ESCAPE) { 
+      running = false 
+    }
+    if sdl.key_down(sdl.K_Q) { 
+      running = false 
+    }
+
+    // Paddle controls
+    if sdl.key_down(sdl.K_W) {
+      p1_y = p1_y - 8
+    }
+    if sdl.key_down(sdl.K_S) {
+      p1_y = p1_y + 8
+    }
+    if sdl.key_down(sdl.K_UP) {
+      p2_y = p2_y - 8
+    }
+    if sdl.key_down(sdl.K_DOWN) {
+      p2_y = p2_y + 8
+    }
+
+    // Clamp paddles to screen
+    if p1_y < 0 { p1_y = 0 }
+    if p1_y + ph > 600 { p1_y = 600 - ph }
+    if p2_y < 0 { p2_y = 0 }
+    if p2_y + ph > 600 { p2_y = 600 - ph }
+
+    // Move ball
+    ball_x = ball_x + ball_vx
+    ball_y = ball_y + ball_vy
+
+    // Ball bounces off top/bottom walls
+    if ball_y <= 0 { 
+      ball_y = 0
+      ball_vy = -ball_vy 
+    }
+    if ball_y >= 600 - ball_size { 
+      ball_y = 600 - ball_size
+      ball_vy = -ball_vy 
+    }
+
+    // Ball hits left paddle
+    if ball_x <= 20 + pw {
+      if ball_y + ball_size >= p1_y {
+        if ball_y <= p1_y + ph {
+          ball_x = 20 + pw
+          ball_vx = -ball_vx
+        }
+      }
+    }
+    
+    // Ball hits right paddle  
+    if ball_x + ball_size >= 800 - 20 - pw {
+      if ball_y + ball_size >= p2_y {
+        if ball_y <= p2_y + ph {
+          ball_x = 800 - 20 - pw - ball_size
+          ball_vx = -ball_vx
+        }
+      }
+    }
+
+    // Scoring - ball goes off left/right edges
+    if ball_x < 0 { 
+      score2 = score2 + 1
+      print("Player 2 scores! Score:", score1, "-", score2)
+      ball_x = 400
+      ball_y = 300
+      ball_vx = 5
+      ball_vy = 4 
+    }
+    if ball_x > 800 { 
+      score1 = score1 + 1
+      print("Player 1 scores! Score:", score1, "-", score2)
+      ball_x = 400
+      ball_y = 300
+      ball_vx = -5
+      ball_vy = 4 
+    }
+
+    // Render everything
+    // Dark background but not black
+    sdl.set_draw_color(ren, 40, 40, 60, 255)
+    sdl.clear(ren)
+    
+    // Center line (bright white, thicker)
+    sdl.fill_rect(ren, 398, 0, 4, 600, 255, 255, 255, 255)
+    
+    // Ball (bright yellow, larger)
+    sdl.fill_rect(ren, ball_x, ball_y, ball_size, ball_size, 255, 255, 0, 255)
+    
+    // Left paddle (bright cyan, brighter)
+    sdl.fill_rect(ren, 20, p1_y, pw, ph, 0, 255, 255, 255)
+    
+    // Right paddle (bright magenta, brighter)
+    sdl.fill_rect(ren, 800-20-pw, p2_y, pw, ph, 255, 0, 255, 255)
+    
+    sdl.present(ren)
+    sdl.delay(16) // ~60 FPS
+  }
+
+  print("Game over! Final score:", score1, "-", score2)
+  sdl.destroy_renderer(ren)
+  sdl.destroy_window(win)
+  sdl.quit()
+}
+
+// Start the game
+main()

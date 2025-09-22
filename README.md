@@ -1,5 +1,7 @@
 # TONG Programming Language
 
+[![CI](https://github.com/amilto-com/Tong/actions/workflows/ci.yml/badge.svg)](https://github.com/amilto-com/Tong/actions/workflows/ci.yml)
+
 <p align="center">
     <img src="images/TONG_a35c8343-4727-4443-bdaf-7ab3e9d3661d.jpg" alt="TONG Logo" width="320" />
 </p>
@@ -58,20 +60,13 @@ git clone https://github.com/amilto-com/Tong.git
 cd Tong
 ```
 
-Create a Python virtual environment (recommended) and install deps:
-
-```bash
-python -m venv .venv
-./.venv/bin/pip install -r requirements.txt   # macOS/Linux
-# or on Windows PowerShell
-.\.venv\Scripts\pip.exe install -r requirements.txt
-```
+Install Rust (if you don't have it): https://rustup.rs
 
 Optional: add a convenient “tong” command to your PATH
 
 - macOS/Linux:
     ```bash
-    ./setup.sh
+    ./setup.sh --global
     ```
 - Windows (PowerShell, no admin required):
     ```powershell
@@ -81,17 +76,17 @@ Optional: add a convenient “tong” command to your PATH
 ### Running TONG
 
 ```bash
-# Start interactive REPL
-python tong.py
+# From the Rust crate directory
+cd rust/tong
 
 # Run a TONG program
-python tong.py examples/hello.tong
+cargo run -- ../../examples/hello.tong
 
-# Run all examples
-python scripts/run_examples.py
+# Build a release binary
+cargo build --release
 
-# Show help
-python tong.py --help
+# After running setup.sh --global or setup.ps1 -Global
+tong ../../examples/hello.tong
 ```
 
 ## Language Examples
@@ -128,10 +123,10 @@ fn factorial(n) {
 ```tong
 let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-// Built-in functions with automatic parallelization
-print("Sum:", sum(numbers))          // Parallel for large arrays
+// Built-in functions
+print("Sum:", sum(numbers))
 print("Length:", len(numbers))
-print("Doubled:", map(numbers, |x| x * 2))  // Parallel map
+print("Squared:", map(numbers, square))
 ```
 
 ### Parallel Computing (today and tomorrow)
@@ -155,55 +150,27 @@ distributed fn process_big_data(data) {
 }
 ```
 
-## REPL Usage
+## REPL
 
-Start the interactive REPL:
+The Rust MVP currently runs .tong files. An interactive REPL is on the roadmap.
 
-```bash
-python tong.py
-```
-
-REPL Commands:
-- `help` - Show help message
-- `vars` - Show all defined variables
-- `history` - Show command history
-- `clear` - Clear environment
-- `exit` - Exit REPL
-
-Example REPL session:
-```
->>> let x = 42
->>> let y = 8
->>> x + y
-=> 50
-
->>> let numbers = [1, 2, 3, 4, 5]
->>> sum(numbers)
-=> 15
-
->>> fn square(n) { n * n }
->>> square(7)
-=> 49
-```
-
-## Built-in Functions
+## Built-in Functions (MVP)
 
 - `print(...)` - Print values with formatted output
 - `len(array)` - Get array or string length
-- `sum(array)` - Sum array elements (auto-parallel for large arrays)
-- `map(array, func)` - Map function over array (auto-parallel)
-- `filter(array, func)` - Filter array elements
-- `reduce(array, func, initial)` - Reduce array to single value
+- `sum(array)` - Sum array elements
+- `map(array, funcName)` - Map function over array using a named function
+- `filter(array, funcName)` - Keep elements for which the named function returns true
+- `reduce(array, funcName, initial)` - Fold array with a named function taking (acc, item)
 
 ## Architecture
 
-TONG is implemented with a modular architecture:
+The Rust MVP consists of:
 
-- **Lexer** (`src/lexer.py`) - Tokenizes source code
-- **Parser** (`src/parser.py`) - Builds Abstract Syntax Tree
-- **AST** (`src/ast_nodes.py`) - Defines language constructs
-- **Interpreter** (`src/interpreter.py`) - Executes TONG programs
-- **REPL** (`src/repl.py`) - Interactive programming environment
+- `rust/tong/src/lexer.rs` - Tokenizes source code
+- `rust/tong/src/parser.rs` - Builds an AST
+- `rust/tong/src/runtime.rs` - Executes TONG programs
+- `rust/tong/src/main.rs` - CLI entry point
 
 ## Language Design Principles
 
@@ -222,10 +189,7 @@ The `examples/` directory contains demonstration programs:
 - `arrays.tong` - Array processing and built-ins
 - `parallel.tong` - Parallel computing examples
 - `advanced.tong` - Advanced language features
-- `rosetta/` - A curated set of Rosetta Code tasks implemented in TONG (FizzBuzz, Fibonacci, GCD, Factorial, Collatz, Prime Factors, 100 Doors, Towers of Hanoi, N‑body, and more). Try them with:
-    ```bash
-    python scripts/run_examples.py
-    ```
+Additional examples and Rosetta tasks will be added as the Rust implementation evolves.
 
 ## Performance
 
@@ -238,17 +202,16 @@ TONG automatically optimizes code for performance:
 
 ## Development Status
 
-🟢 **Completed**
-- Core language implementation
-- Lexer and parser
-- Basic interpreter
-- REPL environment
-- Parallel execution framework
-- Standard library functions
+🟢 **Completed (MVP)**
+- Core language: variables, arithmetic, arrays
+- Functions (definitions, calls, returns)
+- If/else, comparisons, equality
+- Built-ins: print, len, sum, map
 
 🟡 **In Progress**
-- Advanced parallel constructs
-- GPU kernel compilation
+- filter, reduce built-ins
+- Error spans and better diagnostics
+- REPL
 - WebAssembly backend
 
 🔴 **Planned**

@@ -1,0 +1,286 @@
+use anyhow::{anyhow, bail, Result};
+
+use crate::lexer::{Token, TokenKind};
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Str(String),
+    Float(f64),
+    Int(i64),
+    Bool(bool),
+    Ident(String),
+    Binary{ op: BinOp, left: Box<Expr>, right: Box<Expr> },
+    Array(Vec<Expr>),
+    Call{ callee: String, args: Vec<Expr> },
+    Lambda{ params: Vec<String>, body: Box<Expr> },
+    Index(Box<Expr>, Box<Expr>),
+    UnaryNeg(Box<Expr>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Let(String, Expr),
+    Assign(String, Expr),
+    Print(Vec<Expr>),
+    FnMain(Vec<Stmt>),
+    FnDef(String, Vec<String>, Vec<Stmt>),
+    Return(Expr),
+    If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
+    While(Expr, Vec<Stmt>),
+    Parallel(Vec<Stmt>),
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Le, Gt, Ge }
+
+pub fn parse(tokens: Vec<Token>) -> Result<Program> {
+    let mut p = Parser { tokens, pos: 0 };
+    p.parse_program()
+}
+
+struct Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+impl Parser {
+    fn peek(&self) -> Option<&Token> { self.tokens.get(self.pos) }
+    fn bump(&mut self) -> Option<Token> { let t = self.tokens.get(self.pos).cloned(); self.pos += 1; t }
+    fn eat(&mut self, kind: TokenKind) -> Result<Token> { 
+        if let Some(t) = self.peek() { if t.kind == kind { return Ok(self.bump().unwrap()); } }
+        let where_ = self.peek().map(|t| format!(" at line {}, col {}", t.line, t.col)).unwrap_or_default();
+        Err(anyhow!("expected {:?}{}", kind, where_))
+    }
+
+    fn parse_program(&mut self) -> Result<Program> {
+        let mut stmts = Vec::new();
+        while self.peek().is_some() {
+            stmts.push(self.parse_stmt()?);
+        }
+        Ok(Program { stmts })
+    }
+
+    fn peek_is(&self, k: TokenKind) -> bool { self.peek().map(|t| t.kind.clone()) == Some(k) }
+
+    fn parse_fn(&mut self) -> Result<Stmt> {
+        self.eat(TokenKind::Fn)?;
+        let name = self.eat_ident()?;
+        self.eat(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if self.peek_is(TokenKind::Ident) {
+            params.push(self.eat_ident()?);
+            while self.peek_is(TokenKind::Comma) { self.bump(); params.push(self.eat_ident()?); }
+        }
+        self.eat(TokenKind::RParen)?;
+        self.eat(TokenKind::LBrace)?;
+        let mut body = Vec::new();
+        while !self.peek_is(TokenKind::RBrace) { body.push(self.parse_stmt()?); }
+        self.eat(TokenKind::RBrace)?;
+        if name == "main" && params.is_empty() { Ok(Stmt::FnMain(body)) } else { Ok(Stmt::FnDef(name, params, body)) }
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt> {
+        if self.peek_is(TokenKind::Fn) {
+            return self.parse_fn();
+        }
+        if self.peek_is(TokenKind::Parallel) {
+            self.bump();
+            self.eat(TokenKind::LBrace)?;
+            let mut body = Vec::new();
+            while !self.peek_is(TokenKind::RBrace) { body.push(self.parse_stmt()?); }
+            self.eat(TokenKind::RBrace)?;
+            return Ok(Stmt::Parallel(body));
+        }
+        if self.peek_is(TokenKind::While) {
+            self.bump();
+            let cond = self.parse_expr()?;
+            self.eat(TokenKind::LBrace)?;
+            let mut body = Vec::new();
+            while !self.peek_is(TokenKind::RBrace) { body.push(self.parse_stmt()?); }
+            self.eat(TokenKind::RBrace)?;
+            return Ok(Stmt::While(cond, body));
+        }
+        if self.peek_is(TokenKind::Return) {
+            self.bump();
+            let e = self.parse_expr()?;
+            return Ok(Stmt::Return(e));
+        }
+        if self.peek_is(TokenKind::If) {
+            self.bump();
+            let cond = self.parse_expr()?;
+            self.eat(TokenKind::LBrace)?;
+            let mut body = Vec::new();
+            while !self.peek_is(TokenKind::RBrace) { body.push(self.parse_stmt()?); }
+            self.eat(TokenKind::RBrace)?;
+            let else_body = if self.peek_is(TokenKind::Else) {
+                self.bump();
+                self.eat(TokenKind::LBrace)?;
+                let mut ebody = Vec::new();
+                while !self.peek_is(TokenKind::RBrace) { ebody.push(self.parse_stmt()?); }
+                self.eat(TokenKind::RBrace)?;
+                Some(ebody)
+            } else { None };
+            return Ok(Stmt::If(cond, body, else_body));
+        }
+        if self.peek_is(TokenKind::Let) || self.peek_is(TokenKind::Var) {
+            self.bump();
+            let name = self.eat_ident()?;
+            self.eat(TokenKind::Equal)?;
+            let value = self.parse_expr()?;
+            Ok(Stmt::Let(name, value))
+        } else if self.peek_is(TokenKind::Ident) && self.peek_text() == "print" {
+            self.bump(); // print
+            self.eat(TokenKind::LParen)?;
+            let mut args = Vec::new();
+            if !self.peek_is(TokenKind::RParen) {
+                args.push(self.parse_expr()?);
+                while self.peek_is(TokenKind::Comma) { self.bump(); args.push(self.parse_expr()?); }
+            }
+            self.eat(TokenKind::RParen)?;
+            Ok(Stmt::Print(args))
+        } else if self.peek_is(TokenKind::Ident) {
+            // assignment or call
+            let name = self.eat_ident()?;
+            if self.peek_is(TokenKind::Equal) {
+                self.eat(TokenKind::Equal)?;
+                let value = self.parse_expr()?;
+                Ok(Stmt::Assign(name, value))
+            } else if self.peek_is(TokenKind::LParen) {
+                self.eat(TokenKind::LParen)?;
+                let mut args = Vec::new();
+                if !self.peek_is(TokenKind::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.peek_is(TokenKind::Comma) { self.bump(); args.push(self.parse_expr()?); }
+                }
+                self.eat(TokenKind::RParen)?;
+                Ok(Stmt::Expr(Expr::Call{ callee: name, args }))
+            } else {
+                Err(anyhow!("unexpected identifier {}", name))
+            }
+        } else {
+            Err(anyhow!("unexpected token in statement"))
+        }
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr> { self.parse_comparison() }
+
+    fn parse_equality(&mut self) -> Result<Expr> {
+        let mut node = self.parse_additive()?;
+        loop {
+            if self.peek_is(TokenKind::EqualEqual) { self.bump(); let rhs = self.parse_additive()?; node = Expr::Binary{ op: BinOp::Eq, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::BangEqual) { self.bump(); let rhs = self.parse_additive()?; node = Expr::Binary{ op: BinOp::Ne, left: Box::new(node), right: Box::new(rhs) }; }
+            else { break; }
+        }
+        Ok(node)
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr> {
+        let mut node = self.parse_equality()?;
+        loop {
+            if self.peek_is(TokenKind::Less) { self.bump(); let rhs = self.parse_equality()?; node = Expr::Binary{ op: BinOp::Lt, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::LessEqual) { self.bump(); let rhs = self.parse_equality()?; node = Expr::Binary{ op: BinOp::Le, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::Greater) { self.bump(); let rhs = self.parse_equality()?; node = Expr::Binary{ op: BinOp::Gt, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::GreaterEqual) { self.bump(); let rhs = self.parse_equality()?; node = Expr::Binary{ op: BinOp::Ge, left: Box::new(node), right: Box::new(rhs) }; }
+            else { break; }
+        }
+        Ok(node)
+    }
+
+    fn parse_additive(&mut self) -> Result<Expr> {
+        let mut node = self.parse_multiplicative()?;
+        loop {
+            if self.peek_is(TokenKind::Plus) { self.bump(); let rhs = self.parse_multiplicative()?; node = Expr::Binary{ op: BinOp::Add, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::Minus) { self.bump(); let rhs = self.parse_multiplicative()?; node = Expr::Binary{ op: BinOp::Sub, left: Box::new(node), right: Box::new(rhs) }; }
+            else { break; }
+        }
+        Ok(node)
+    }
+
+    fn parse_multiplicative(&mut self) -> Result<Expr> {
+        let mut node = self.parse_unary()?;
+        loop {
+            if self.peek_is(TokenKind::Star) { self.bump(); let rhs = self.parse_unary()?; node = Expr::Binary{ op: BinOp::Mul, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::Slash) { self.bump(); let rhs = self.parse_unary()?; node = Expr::Binary{ op: BinOp::Div, left: Box::new(node), right: Box::new(rhs) }; }
+            else if self.peek_is(TokenKind::Percent) { self.bump(); let rhs = self.parse_unary()?; node = Expr::Binary{ op: BinOp::Mod, left: Box::new(node), right: Box::new(rhs) }; }
+            else { break; }
+        }
+        Ok(node)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr> {
+        if self.peek_is(TokenKind::Minus) { self.bump(); let e = self.parse_unary()?; return Ok(Expr::UnaryNeg(Box::new(e))); }
+        if self.peek_is(TokenKind::Plus) { self.bump(); return self.parse_unary(); }
+        self.parse_primary()
+    }
+
+    fn parse_atom(&mut self) -> Result<Expr> {
+        // Lambda: |x| expr
+        if self.peek_is(TokenKind::Pipe) {
+            self.eat(TokenKind::Pipe)?;
+            let mut params = Vec::new();
+            params.push(self.eat_ident()?);
+            self.eat(TokenKind::Pipe)?;
+            let body = self.parse_expr()?;
+            return Ok(Expr::Lambda { params, body: Box::new(body) });
+        }
+        if self.peek_is(TokenKind::LParen) { self.eat(TokenKind::LParen)?; let e = self.parse_expr()?; self.eat(TokenKind::RParen)?; return Ok(e); }
+        if self.peek_is(TokenKind::String) { Ok(Expr::Str(self.bump().unwrap().text.trim_matches('"').to_string())) }
+        else if self.peek_is(TokenKind::Float) { Ok(Expr::Float(self.bump().unwrap().text.parse()?)) }
+        else if self.peek_is(TokenKind::Int) { Ok(Expr::Int(self.bump().unwrap().text.parse()?)) }
+        else if self.peek_is(TokenKind::True) { self.bump(); Ok(Expr::Bool(true)) }
+        else if self.peek_is(TokenKind::False) { self.bump(); Ok(Expr::Bool(false)) }
+        else if self.peek_is(TokenKind::LBracket) {
+            self.eat(TokenKind::LBracket)?;
+            let mut elems = Vec::new();
+            if !self.peek_is(TokenKind::RBracket) {
+                elems.push(self.parse_expr()?);
+                while self.peek_is(TokenKind::Comma) { self.bump(); elems.push(self.parse_expr()?); }
+            }
+            self.eat(TokenKind::RBracket)?;
+            Ok(Expr::Array(elems))
+        }
+        else if self.peek_is(TokenKind::Ident) {
+            let name = self.bump().unwrap().text;
+            if self.peek_is(TokenKind::LParen) {
+                self.eat(TokenKind::LParen)?;
+                let mut args = Vec::new();
+                if !self.peek_is(TokenKind::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.peek_is(TokenKind::Comma) { self.bump(); args.push(self.parse_expr()?); }
+                }
+                self.eat(TokenKind::RParen)?;
+                Ok(Expr::Call{ callee: name, args })
+            } else {
+                Ok(Expr::Ident(name))
+            }
+        } else {
+            if let Some(t) = self.peek() { bail!("unexpected token {:?} '{}' at {}:{}", t.kind, t.text, t.line, t.col); }
+            else { Err(anyhow!("unexpected end of input"))? }
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr> {
+        let mut node = self.parse_atom()?;
+        while self.peek_is(TokenKind::LBracket) {
+            self.eat(TokenKind::LBracket)?;
+            let idx = self.parse_expr()?;
+            self.eat(TokenKind::RBracket)?;
+            node = Expr::Index(Box::new(node), Box::new(idx));
+        }
+        Ok(node)
+    }
+
+    fn eat_ident(&mut self) -> Result<String> {
+        if self.peek_is(TokenKind::Ident) { Ok(self.bump().unwrap().text) } else {
+            if let Some(t) = self.peek() { bail!("expected identifier at {}:{}", t.line, t.col); } else { bail!("expected identifier at end of input"); }
+        }
+    }
+
+    fn peek_text(&self) -> String { self.peek().map(|t| t.text.clone()).unwrap_or_default() }
+}

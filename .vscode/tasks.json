@@ -1,0 +1,38 @@
+{
+  // VS Code tasks for TONG (Rust)
+  // $schema intentionally omitted to avoid network fetch errors in some environments
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Rust: Clippy (deny warnings)",
+      "type": "shell",
+      "options": { "cwd": "${workspaceFolder}/rust/tong" },
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "detail": "Run Clippy on all targets and fail on warnings"
+    },
+    {
+      "label": "Rust: fmt (check)",
+      "type": "shell",
+      "options": { "cwd": "${workspaceFolder}/rust/tong" },
+      "command": "cargo",
+      "args": [
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}
