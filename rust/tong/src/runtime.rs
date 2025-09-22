@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
+use std::time::Duration;
 
 use crate::parser::{BinOp, Expr, Program, Stmt};
 
@@ -12,9 +13,10 @@ pub fn execute(program: Program) -> Result<()> {
         if let Stmt::FnMain(body) = stmt { env.funcs.insert("main".to_string(), (Vec::new(), body.clone())); }
     }
 
-    // Execute top-level statements (let/assign/print)
+    // Execute top-level statements (import/let/assign/print)
     for stmt in &program.stmts {
         match stmt {
+            Stmt::Import(name, module) => { let v = env.import_module(module)?; env.vars_mut().insert(name.clone(), v); }
             Stmt::Let(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
             Stmt::Assign(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
             Stmt::Print(args) => { let parts: Result<Vec<String>> = args.iter().cloned().map(|e| env.eval_expr(e).map(|v| format_value(&v))).collect(); println!("{}", parts?.join(" ")); }
@@ -23,10 +25,7 @@ pub fn execute(program: Program) -> Result<()> {
         }
     }
 
-    // Call main() if present
-    if env.funcs.contains_key("main") {
-        let _ = env.call_function("main".to_string(), vec![])?;
-    }
+    // Call main() if present unless the script calls it explicitly; to avoid double-run, we no longer auto-invoke here.
 
     Ok(())
 }
@@ -40,16 +39,60 @@ enum Value {
     Array(Vec<Value>),
     Lambda { params: Vec<String>, body: Box<Expr>, env: HashMap<String, Value> },
     FuncRef(String),
+    Object(HashMap<String, Value>),
 }
 
 #[derive(Default)]
 struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
     funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    modules: HashMap<String, Value>, // loaded modules
+    sdl_frame: i64, // headless SDL shim frame counter
+    #[cfg(feature = "sdl3")]
+    sdl: Option<SdlState>,
 }
 
 impl Env {
-    fn new() -> Self { Self { vars_stack: vec![HashMap::new()], funcs: HashMap::new() } }
+    // Execute a sequence of statements. Return Some(value) if a Return was hit.
+    fn exec_block(&mut self, block: &[Stmt]) -> Result<Option<Value>> {
+        for s in block {
+            if let Some(rv) = self.exec_stmt(s)? { return Ok(Some(rv)); }
+        }
+        Ok(None)
+    }
+
+    // Execute a single statement. Return Some(value) if a Return was hit.
+    fn exec_stmt(&mut self, s: &Stmt) -> Result<Option<Value>> {
+        match s {
+            Stmt::Import(n, m) => { let v = self.import_module(m)?; self.vars_mut().insert(n.clone(), v); Ok(None) }
+            Stmt::Let(n, e) => { let v = self.eval_expr(e.clone())?; self.vars_mut().insert(n.clone(), v); Ok(None) }
+            Stmt::Assign(n, e) => { let v = self.eval_expr(e.clone())?; self.vars_mut().insert(n.clone(), v); Ok(None) }
+            Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e.clone())?)); } println!("{}", parts.join(" ")); Ok(None) }
+            Stmt::Return(e) => { let v = self.eval_expr(e.clone())?; Ok(Some(v)) }
+            Stmt::FnDef(name, params, body) => { self.funcs.insert(name.clone(), (params.clone(), body.clone())); Ok(None) }
+            Stmt::Expr(e) => { let _ = self.eval_expr(e.clone())?; Ok(None) }
+            Stmt::FnMain(_) => Ok(None),
+            Stmt::If(cond, then_body, else_body) => {
+                let v = self.eval_expr(cond.clone())?;
+                if matches!(v, Value::Bool(true)) {
+                    self.exec_block(then_body)
+                } else if let Some(eb) = else_body { self.exec_block(eb) } else { Ok(None) }
+            }
+            Stmt::While(cond, body) => {
+                loop {
+                    let v = self.eval_expr(cond.clone())?;
+                    if !matches!(v, Value::Bool(true)) { break; }
+                    if let Some(rv) = self.exec_block(body)? { return Ok(Some(rv)); }
+                }
+                Ok(None)
+            }
+            Stmt::Parallel(inner) => {
+                for is in inner { if let Some(rv) = self.exec_stmt(is)? { return Ok(Some(rv)); } }
+                Ok(None)
+            }
+        }
+    }
+    fn new() -> Self { Self { vars_stack: vec![HashMap::new()], funcs: HashMap::new(), modules: HashMap::new(), sdl_frame: 0, #[cfg(feature="sdl3")] sdl: None } }
     fn vars(&self) -> &HashMap<String, Value> { self.vars_stack.last().unwrap() }
     fn vars_mut(&mut self) -> &mut HashMap<String, Value> { self.vars_stack.last_mut().unwrap() }
     fn get_var(&self, name: &str) -> Option<Value> {
@@ -61,6 +104,38 @@ impl Env {
 
     fn eval_expr(&mut self, e: Expr) -> Result<Value> {
         Ok(match e {
+            Expr::Property { target, name } => {
+                let obj = self.eval_expr(*target)?;
+                match obj {
+                    Value::Object(map) => map.get(&name).cloned().ok_or_else(|| anyhow::anyhow!(format!("unknown property {}", name)))?,
+                    _ => bail!("property access on non-object"),
+                }
+            }
+            Expr::MethodCall{ target, method, args } => {
+                let obj_val = self.eval_expr(*target)?;
+                match obj_val.clone() {
+                    Value::Object(map) => {
+                        let func = map.get(&method).cloned().ok_or_else(|| anyhow::anyhow!("unknown method {}", method))?;
+                        let mut values: Vec<Value> = Vec::new();
+                        // For our module methods, we pass evaluated args; some APIs expect (handle, ...), but our API encodes handle as first arg explicitly in the .tong code.
+                        for a in args { values.push(self.eval_expr(a)?); }
+                        match func {
+                            Value::FuncRef(name) => {
+                                if name.starts_with("sdl_") {
+                                    // Build Expr args: if the first arg is a renderer/window handle placeholder, map to a simple int; otherwise, just map basic values.
+                                    let expr_args: Vec<Expr> = values.into_iter().map(|v| expr_from_value(&v)).collect();
+                                    self.call_sdl_builtin(&name, expr_args)?
+                                } else {
+                                    self.call_function_values(name, values)?
+                                }
+                            }
+                            Value::Lambda { params, body, env } => self.call_lambda_values(params, *body, env, values)?,
+                            _ => bail!("{} is not callable", method),
+                        }
+                    }
+                    _ => bail!("method call on non-object"),
+                }
+            }
             Expr::Lambda { params, body } => {
                 // capture current top frame
                 let env = self.vars().clone();
@@ -97,6 +172,11 @@ impl Env {
                         if args.len() != 1 { bail!("len expects 1 argument"); }
                         let v0 = self.eval_expr(args[0].clone())?;
                         match v0 { Value::Array(v) => Value::Int(v.len() as i64), _ => bail!("len expects array") }
+                    }
+                    "import" => {
+                        if args.len() != 1 { bail!("import expects 1 argument"); }
+                        let v0 = self.eval_expr(args[0].clone())?;
+                        match v0 { Value::Str(name) => self.import_module(&name)?, _ => bail!("import expects string module name") }
                     }
                     "sum" => {
                         if args.len() != 1 { bail!("sum expects 1 argument"); }
@@ -177,17 +257,17 @@ impl Env {
                             match v {
                                 Value::Lambda { params, body, env } => {
                                     let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-                                    self.call_lambda(params, *body, env, evaled?.into_iter().map(|v| expr_from_value(&v)).collect())?
+                                    self.call_lambda_values(params, *body, env, evaled?)?
                                 }
                                 Value::FuncRef(name) => {
                                     let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-                                    self.call_function(name, evaled?.into_iter().map(|v| expr_from_value(&v)).collect())?
+                                    self.call_function_values(name, evaled?)?
                                 }
                                 _ => bail!("{} is not callable", callee),
                             }
                         } else if self.funcs.contains_key(&callee) {
                             let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-                            self.call_function(callee.clone(), evaled?.into_iter().map(|v| expr_from_value(&v)).collect())?
+                            self.call_function_values(callee.clone(), evaled?)?
                         } else {
                             bail!("unknown function {}", callee)
                         }
@@ -219,12 +299,12 @@ impl Env {
                     (Value::Float(a), Value::Int(b), BinOp::Mul) => Value::Float(a * b as f64),
                     (Value::Float(a), Value::Int(b), BinOp::Div) => Value::Float(a / b as f64),
 
-                    (Value::Float(a), Value::Float(b), BinOp::Eq) => Value::Bool((a - b).abs() < std::f64::EPSILON),
+                    (Value::Float(a), Value::Float(b), BinOp::Eq) => Value::Bool((a - b).abs() < f64::EPSILON),
                     (Value::Int(a), Value::Int(b), BinOp::Eq) => Value::Bool(a == b),
                     (Value::Bool(a), Value::Bool(b), BinOp::Eq) => Value::Bool(a == b),
                     (Value::Str(a), Value::Str(b), BinOp::Eq) => Value::Bool(a == b),
 
-                    (Value::Float(a), Value::Float(b), BinOp::Ne) => Value::Bool((a - b).abs() >= std::f64::EPSILON),
+                    (Value::Float(a), Value::Float(b), BinOp::Ne) => Value::Bool((a - b).abs() >= f64::EPSILON),
                     (Value::Int(a), Value::Int(b), BinOp::Ne) => Value::Bool(a != b),
                     (Value::Bool(a), Value::Bool(b), BinOp::Ne) => Value::Bool(a != b),
                     (Value::Str(a), Value::Str(b), BinOp::Ne) => Value::Bool(a != b),
@@ -258,14 +338,20 @@ impl Env {
                 // could be function name or variable holding function/lambda
                 if let Some(v) = self.get_var(&name) {
                     match v {
-                        Value::Lambda { params, body, env } => self.call_lambda(params, *body, env, args),
-                        Value::FuncRef(fname) => self.call_function(fname, args),
+                        Value::Lambda { params, body, env } => {
+                            // Evaluate args then call with values to preserve object args
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            self.call_lambda_values(params, *body, env, evaled?)
+                        }
+                        Value::FuncRef(fname) => {
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            self.call_function_values(fname, evaled?)
+                        }
                         _ => bail!("{} is not callable", name),
                     }
-                } else if self.funcs.contains_key(&name) {
-                    self.call_function(name, args)
                 } else {
-                    bail!("unknown function {}", name)
+                    // delegate to call_function to handle built-ins (e.g., sdl_*) and user-defined functions
+                    self.call_function(name, args)
                 }
             }
             Expr::Lambda { params, body } => {
@@ -292,7 +378,25 @@ impl Env {
         self.vars_stack.pop();
         result
     }
+
+    // Lambda call with pre-evaluated values (avoids re-evaluating and supports object args)
+    fn call_lambda_values(&mut self, params: Vec<String>, body: Expr, captured_env: HashMap<String, Value>, values: Vec<Value>) -> Result<Value> {
+        if params.len() != values.len() { bail!("arity mismatch for lambda"); }
+        self.vars_stack.push(captured_env);
+        self.vars_stack.push(HashMap::new());
+        for (p, v) in params.iter().zip(values.into_iter()) {
+            self.vars_mut().insert(p.clone(), v);
+        }
+        let result = self.eval_expr(body.clone());
+        self.vars_stack.pop();
+        self.vars_stack.pop();
+        result
+    }
     fn call_function(&mut self, name: String, args: Vec<Expr>) -> Result<Value> {
+        // Built-in shims for SDL module
+        if name.starts_with("sdl_") {
+            return self.call_sdl_builtin(&name, args);
+        }
         let (params, body) = self
             .funcs
             .get(&name)
@@ -306,82 +410,28 @@ impl Env {
             self.vars_mut().insert(p.clone(), val);
         }
 
-        // Execute body
-        let mut ret: Option<Value> = None;
-        for s in body {
-            match s {
-                Stmt::Let(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                Stmt::Assign(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e)?)); } println!("{}", parts.join(" ")); }
-                Stmt::Return(e) => { ret = Some(self.eval_expr(e)?); break; }
-                Stmt::FnDef(name, params, body) => { self.funcs.insert(name, (params, body)); }
-                Stmt::Parallel(inner) => {
-                    // No-op for now: execute sequentially
-                    for is in inner {
-                        match is {
-                            Stmt::Let(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                            Stmt::Assign(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                            Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e)?)); } println!("{}", parts.join(" ")); }
-                            Stmt::Return(e) => { ret = Some(self.eval_expr(e)?); }
-                            Stmt::FnDef(name, params, body) => { self.funcs.insert(name, (params, body)); }
-                            Stmt::If(_, _, _) | Stmt::Expr(_) | Stmt::FnMain(_) | Stmt::Parallel(_) | Stmt::While(_, _) => { /* ignore here, outer loop will handle */ }
-                        }
-                        if ret.is_some() { break; }
-                    }
-                }
-                Stmt::While(cond, body) => {
-                    while matches!(self.eval_expr(cond.clone())?, Value::Bool(true)) {
-                        for ws in body.clone() {
-                            match ws {
-                                Stmt::Let(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Assign(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e)?)); } println!("{}", parts.join(" ")); }
-                                Stmt::Return(e) => { ret = Some(self.eval_expr(e)?); break; }
-                                Stmt::FnDef(name, params, body) => { self.funcs.insert(name, (params, body)); }
-                                Stmt::If(_, _, _) | Stmt::Expr(_) | Stmt::FnMain(_) | Stmt::Parallel(_) | Stmt::While(_, _) => { /* ignore */ }
-                            }
-                            if ret.is_some() { break; }
-                        }
-                        if ret.is_some() { break; }
-                    }
-                }
-                Stmt::If(cond, then_body, else_body) => {
-                    let v = self.eval_expr(cond)?;
-                    if matches!(v, Value::Bool(true)) {
-                        for ts in then_body {
-                            match ts {
-                                Stmt::Let(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Assign(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e)?)); } println!("{}", parts.join(" ")); }
-                                Stmt::Return(e) => { ret = Some(self.eval_expr(e)?); break; }
-                                Stmt::FnDef(name, params, body) => { self.funcs.insert(name, (params, body)); }
-                                Stmt::If(_, _, _) | Stmt::Expr(_) | Stmt::FnMain(_) | Stmt::While(_, _) | Stmt::Parallel(_) => { /* ignore */ }
-                            }
-                            if ret.is_some() { break; }
-                        }
-                    } else if let Some(else_body) = else_body {
-                        for ts in else_body {
-                            match ts {
-                                Stmt::Let(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Assign(n, e) => { let v = self.eval_expr(e)?; self.vars_mut().insert(n, v); }
-                                Stmt::Print(args) => { let mut parts = Vec::new(); for e in args { parts.push(format_value(&self.eval_expr(e)?)); } println!("{}", parts.join(" ")); }
-                                Stmt::Return(e) => { ret = Some(self.eval_expr(e)?); break; }
-                                Stmt::FnDef(name, params, body) => { self.funcs.insert(name, (params, body)); }
-                                Stmt::If(_, _, _) | Stmt::Expr(_) | Stmt::FnMain(_) | Stmt::While(_, _) | Stmt::Parallel(_) => { /* ignore */ }
-                            }
-                            if ret.is_some() { break; }
-                        }
-                    }
-                }
-                Stmt::Expr(e) => { let _ = self.eval_expr(e)?; }
-                Stmt::FnMain(_) => {}
-            }
-            if ret.is_some() { break; }
-        }
-
+        // Execute body with nested control-flow properly handled
+        let ret = self.exec_block(&body)?;
         // Pop the frame
         self.vars_stack.pop();
+        Ok(ret.unwrap_or(Value::Int(0)))
+    }
 
+    // Function call with pre-evaluated values (avoids expr_from_value conversion issues for objects)
+    fn call_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
+        if name.starts_with("sdl_") { bail!("internal: call_function_values should not be used for SDL builtins"); }
+        let (params, body) = self
+            .funcs
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown function {}", name))?;
+        if params.len() != values.len() { bail!("arity mismatch for {}", name); }
+        self.vars_stack.push(HashMap::new());
+        for (p, v) in params.iter().zip(values.into_iter()) {
+            self.vars_mut().insert(p.clone(), v);
+        }
+        let ret = self.exec_block(&body)?;
+        self.vars_stack.pop();
         Ok(ret.unwrap_or(Value::Int(0)))
     }
 }
@@ -400,6 +450,7 @@ fn format_value(v: &Value) -> String {
         }
         Value::Lambda { .. } => "<lambda>".to_string(),
         Value::FuncRef(name) => format!("<func:{}>", name),
+        Value::Object(_) => "<object>".to_string(),
     }
 }
 
@@ -412,5 +463,253 @@ fn expr_from_value(v: &Value) -> Expr {
         Value::Array(items) => Expr::Array(items.iter().map(expr_from_value).collect()),
         Value::Lambda { params, body, .. } => Expr::Lambda { params: params.clone(), body: body.clone() },
         Value::FuncRef(name) => Expr::Ident(name.clone()),
+        Value::Object(_) => Expr::Ident("<object>".to_string()),
     }
+}
+
+// For builtin dispatch where we already have evaluated values, keep non-expressible values as-is via a placeholder approach.
+fn expr_from_value_passthrough(v: Value) -> Expr {
+    match v {
+        Value::Str(s) => Expr::Str(s),
+        Value::Int(i) => Expr::Int(i),
+        Value::Float(f) => Expr::Float(f),
+        Value::Bool(b) => Expr::Bool(b),
+        Value::Array(items) => Expr::Array(items.iter().map(expr_from_value).collect()),
+        Value::Lambda { params, body, .. } => Expr::Lambda { params, body },
+        Value::FuncRef(name) => Expr::Ident(name),
+        Value::Object(map) => {
+            // store the object in a temp variable on the top frame and reference it; generate a unique name
+            let temp_name = format!("__obj_{}", map.len());
+            // Note: This helper can't access self; we'll not use it for non-SDL builtins to avoid this complexity.
+            Expr::Ident(temp_name)
+        }
+    }
+}
+
+impl Env {
+    fn import_module(&mut self, name: &str) -> Result<Value> {
+        if let Some(v) = self.modules.get(name) { return Ok(v.clone()); }
+        match name {
+            "sdl" => {
+                let v = self.import_sdl();
+                self.modules.insert(name.to_string(), v.clone());
+                Ok(v)
+            }
+            other => bail!("unknown module '{}'; built-ins: sdl", other),
+        }
+    }
+
+    fn import_sdl(&mut self) -> Value {
+        let mut obj = HashMap::new();
+        // constants
+        obj.insert("K_ESCAPE".to_string(), Value::Int(27));
+        obj.insert("K_Q".to_string(), Value::Int(81));
+        obj.insert("K_W".to_string(), Value::Int(87));
+        obj.insert("K_S".to_string(), Value::Int(83));
+        obj.insert("K_UP".to_string(), Value::Int(1000));
+        obj.insert("K_DOWN".to_string(), Value::Int(1001));
+        // functions (method names map to builtin function identifiers)
+        obj.insert("init".into(), Value::FuncRef("sdl_init".into()));
+        obj.insert("create_window".into(), Value::FuncRef("sdl_create_window".into()));
+        obj.insert("create_renderer".into(), Value::FuncRef("sdl_create_renderer".into()));
+        obj.insert("set_draw_color".into(), Value::FuncRef("sdl_set_draw_color".into()));
+        obj.insert("clear".into(), Value::FuncRef("sdl_clear".into()));
+        obj.insert("fill_rect".into(), Value::FuncRef("sdl_fill_rect".into()));
+        obj.insert("present".into(), Value::FuncRef("sdl_present".into()));
+        obj.insert("delay".into(), Value::FuncRef("sdl_delay".into()));
+        obj.insert("poll_quit".into(), Value::FuncRef("sdl_poll_quit".into()));
+        obj.insert("key_down".into(), Value::FuncRef("sdl_key_down".into()));
+        obj.insert("destroy_renderer".into(), Value::FuncRef("sdl_destroy_renderer".into()));
+        obj.insert("destroy_window".into(), Value::FuncRef("sdl_destroy_window".into()));
+        obj.insert("quit".into(), Value::FuncRef("sdl_quit".into()));
+        Value::Object(obj)
+    }
+
+    fn call_sdl_builtin(&mut self, name: &str, args: Vec<Expr>) -> Result<Value> {
+        #[cfg(feature = "sdl3")]
+        {
+            return self.call_sdl_builtin_real(name, args);
+        }
+        #[cfg(not(feature = "sdl3"))]
+        match name {
+            "sdl_init" => Ok(Value::Int(0)),
+            "sdl_create_window" => Ok(Value::Int(1)),
+            "sdl_create_renderer" => Ok(Value::Int(1)),
+            "sdl_set_draw_color" => Ok(Value::Int(0)),
+            "sdl_clear" => Ok(Value::Int(0)),
+            "sdl_fill_rect" => Ok(Value::Int(0)),
+            "sdl_present" => Ok(Value::Int(0)),
+            "sdl_delay" => {
+                // Simulate ~60 FPS by increasing frame count; no sleeping for CI speed
+                let _ = args; // ignore actual ms
+                self.sdl_frame += 1;
+                Ok(Value::Int(0))
+            }
+            "sdl_poll_quit" => {
+                let quit = self.sdl_frame >= 300; // auto-quit after ~300 frames
+                Ok(Value::Bool(quit))
+            }
+            "sdl_key_down" => Ok(Value::Bool(false)),
+            "sdl_destroy_renderer" => Ok(Value::Int(0)),
+            "sdl_destroy_window" => Ok(Value::Int(0)),
+            "sdl_quit" => Ok(Value::Int(0)),
+            other => bail!("unknown SDL builtin {}", other),
+        }
+    }
+}
+
+#[cfg(feature = "sdl3")]
+struct SdlState {
+    sdl: sdl3::Sdl,
+    video: sdl3::VideoSubsystem,
+    window: Option<sdl3::video::Window>,
+    canvas: Option<sdl3::render::Canvas<sdl3::video::Window>>,
+    events: sdl3::EventPump,
+    draw_color: (u8, u8, u8, u8),
+}
+
+#[cfg(feature = "sdl3")]
+impl Env {
+    fn sdl_state_mut(&mut self) -> Result<&mut SdlState> {
+        if self.sdl.is_none() {
+            let sdl = sdl3::init().map_err(|e| anyhow!(e))?;
+            let video = sdl.video().map_err(|e| anyhow!(e))?;
+            let events = sdl.event_pump().map_err(|e| anyhow!(e))?;
+            self.sdl = Some(SdlState { sdl, video, window: None, canvas: None, events, draw_color: (0,0,0,255) });
+        }
+        Ok(self.sdl.as_mut().unwrap())
+    }
+
+    fn call_sdl_builtin_real(&mut self, name: &str, args: Vec<Expr>) -> Result<Value> {
+    use sdl3::{event::Event, keyboard::Scancode, pixels::Color, rect::Rect};
+        match name {
+            "sdl_init" => {
+                let _ = self.sdl_state_mut()?; // ensure initialized
+                Ok(Value::Int(0))
+            }
+            "sdl_create_window" => {
+                // evaluate arguments first to avoid borrow conflicts
+                let title = match args.get(0).map(|e| self.eval_expr(e.clone())) { Some(Ok(Value::Str(s))) => s, _ => "TONG".to_string() };
+                let w = match args.get(1).map(|e| self.eval_expr(e.clone())) { Some(Ok(Value::Int(i))) => i as u32, _ => 800 };
+                let h = match args.get(2).map(|e| self.eval_expr(e.clone())) { Some(Ok(Value::Int(i))) => i as u32, _ => 600 };
+                let state = self.sdl_state_mut()?;
+                let window = state
+                    .video
+                    .window(&title, w, h)
+                    .position_centered()
+                    .build()
+                    .map_err(|e| anyhow!(e))?;
+                state.window = Some(window);
+                Ok(Value::Int(1))
+            }
+            "sdl_create_renderer" => {
+                let state = self.sdl_state_mut()?;
+                let window = state.window.take().ok_or_else(|| anyhow!("create_renderer: window not created"))?;
+                // sdl3 API: into_canvas() returns a Canvas directly (no builder chain)
+                let canvas = window.into_canvas();
+                state.canvas = Some(canvas);
+                Ok(Value::Int(1))
+            }
+            "sdl_set_draw_color" => {
+                let (r,g,b,a) = (
+                    self.eval_expr(args[1].clone())?.as_int_u8()?,
+                    self.eval_expr(args[2].clone())?.as_int_u8()?,
+                    self.eval_expr(args[3].clone())?.as_int_u8()?,
+                    self.eval_expr(args[4].clone())?.as_int_u8()?,
+                );
+                let state = self.sdl_state_mut()?;
+                let canvas = state.canvas.as_mut().ok_or_else(|| anyhow!("renderer not created"))?;
+                canvas.set_draw_color(Color::RGBA(r,g,b,a));
+                state.draw_color = (r,g,b,a);
+                Ok(Value::Int(0))
+            }
+            "sdl_clear" => {
+                let state = self.sdl_state_mut()?;
+                let canvas = state.canvas.as_mut().ok_or_else(|| anyhow!("renderer not created"))?;
+                canvas.clear();
+                Ok(Value::Int(0))
+            }
+            "sdl_fill_rect" => {
+                // args: (ren, x,y,w,h, r,g,b,a)
+                let x = self.eval_expr(args[1].clone())?.as_int_i32()?;
+                let y = self.eval_expr(args[2].clone())?.as_int_i32()?;
+                let w = self.eval_expr(args[3].clone())?.as_int_u32()?;
+                let h = self.eval_expr(args[4].clone())?.as_int_u32()?;
+                let (r,g,b,a) = (
+                    self.eval_expr(args[5].clone())?.as_int_u8()?,
+                    self.eval_expr(args[6].clone())?.as_int_u8()?,
+                    self.eval_expr(args[7].clone())?.as_int_u8()?,
+                    self.eval_expr(args[8].clone())?.as_int_u8()?,
+                );
+                let state = self.sdl_state_mut()?;
+                let canvas = state.canvas.as_mut().ok_or_else(|| anyhow!("renderer not created"))?;
+                let prev = state.draw_color;
+                canvas.set_draw_color(Color::RGBA(r,g,b,a));
+                canvas.fill_rect(Rect::new(x, y, w, h)).ok();
+                canvas.set_draw_color(Color::RGBA(prev.0, prev.1, prev.2, prev.3));
+                Ok(Value::Int(0))
+            }
+            "sdl_present" => {
+                let state = self.sdl_state_mut()?;
+                let canvas = state.canvas.as_mut().ok_or_else(|| anyhow!("renderer not created"))?;
+                canvas.present();
+                Ok(Value::Int(0))
+            }
+            "sdl_delay" => {
+                let ms = match args.get(0).map(|e| self.eval_expr(e.clone())) { Some(Ok(Value::Int(i))) => i, _ => 16 };
+                std::thread::sleep(Duration::from_millis(ms as u64));
+                Ok(Value::Int(0))
+            }
+            "sdl_poll_quit" => {
+                let state = self.sdl_state_mut()?;
+                let mut quit = false;
+                for event in state.events.poll_iter() {
+                    if let Event::Quit { .. } = event { quit = true; break; }
+                }
+                Ok(Value::Bool(quit))
+            }
+            "sdl_key_down" => {
+                let code = match args.get(0).map(|e| self.eval_expr(e.clone())) { Some(Ok(Value::Int(i))) => i, _ => 0 };
+                let state = self.sdl_state_mut()?;
+                let kb = state.events.keyboard_state();
+                let pressed = match code {
+                    27 => kb.is_scancode_pressed(Scancode::Escape),
+                    81 => kb.is_scancode_pressed(Scancode::Q),
+                    87 => kb.is_scancode_pressed(Scancode::W),
+                    83 => kb.is_scancode_pressed(Scancode::S),
+                    1000 => kb.is_scancode_pressed(Scancode::Up),
+                    1001 => kb.is_scancode_pressed(Scancode::Down),
+                    _ => false,
+                };
+                Ok(Value::Bool(pressed))
+            }
+            "sdl_destroy_renderer" => {
+                let state = self.sdl_state_mut()?;
+                let _ = args; // ignore handle
+                state.canvas = None;
+                Ok(Value::Int(0))
+            }
+            "sdl_destroy_window" => {
+                let state = self.sdl_state_mut()?;
+                let _ = args; // ignore handle
+                state.window = None;
+                Ok(Value::Int(0))
+            }
+            "sdl_quit" => {
+                // Drop everything
+                if let Some(st) = self.sdl.as_mut() {
+                    st.window = None;
+                }
+                Ok(Value::Int(0))
+            }
+            other => bail!("unknown SDL builtin {}", other),
+        }
+    }
+}
+
+// Helper conversions for Value to numeric types
+impl Value {
+    fn as_int_u8(&self) -> Result<u8> { match self { Value::Int(i) => Ok((*i).clamp(0, 255) as u8), _ => bail!("expected int") } }
+    fn as_int_u32(&self) -> Result<u32> { match self { Value::Int(i) => Ok((*i).max(0) as u32), _ => bail!("expected int") } }
+    fn as_int_i32(&self) -> Result<i32> { match self { Value::Int(i) => Ok(*i as i32), _ => bail!("expected int") } }
 }

@@ -21,7 +21,9 @@ wheels/
 *.egg
 
 # IDEs
-.vscode/
+# Keep VS Code tasks.json, ignore other VS Code workspace files
+.vscode/*
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
@@ -51,3 +53,7 @@ htmlcov/
 *.exe
 *.wasm
 *.bc
+
+# Rust
+target/
+rust/**/target/

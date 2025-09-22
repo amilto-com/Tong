@@ -36,6 +36,7 @@ pub enum TokenKind {
     #[token("]")] RBracket,
     #[token(",")] Comma,
     #[token(":")] Colon,
+    #[token(".")] Dot,
     #[token("|")] Pipe,
     #[token("==")] EqualEqual,
     #[token("!=")] BangEqual,
