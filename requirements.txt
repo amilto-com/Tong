@@ -1,0 +1,2 @@
+# TONG Programming Language Requirements
+# No external dependencies - pure Python implementation
