@@ -6,8 +6,8 @@ mod parser;
 mod runtime;
 
 #[derive(Parser)]
-#[command(name = "tong")] 
-#[command(version = "0.1.0")] 
+#[command(name = "tong")]
+#[command(version = "0.1.0")]
 #[command(about = "TONG - The Ultimate Programming Language (Rust MVP)")]
 struct Cli {
     /// Path to a .tong source file to run
@@ -23,7 +23,9 @@ fn main() -> anyhow::Result<()> {
         let program = parser::parse(tokens)?;
         runtime::execute(program)?;
     } else {
-        println!("TONG (Rust MVP) - run a .tong file, e.g.: cargo run -- ../../examples/hello.tong");
+        println!(
+            "TONG (Rust MVP) - run a .tong file, e.g.: cargo run -- ../../examples/hello.tong"
+        );
     }
 
     Ok(())
