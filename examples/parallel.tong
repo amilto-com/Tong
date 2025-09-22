@@ -1,0 +1,65 @@
+// Parallel Computing Example in TONG
+// Demonstrates automatic parallelization
+
+fn simple_compute(n) {
+    return n * n + n - 1
+}
+
+fn square(x) {
+    return x * x
+}
+
+fn double(x) {
+    return x * 2
+}
+
+fn parallel_array_processing() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    
+    print("Original numbers:", numbers)
+    
+    // Map automatically parallelizes for large datasets
+    let squared = map(numbers, square)
+    let doubled = map(numbers, double)
+    
+    print("Squared:", squared)
+    print("Doubled:", doubled)
+    
+    // Parallel sum automatically detects large arrays
+    let total = sum(numbers)
+    print("Sum:", total)
+}
+
+fn manual_parallel_block() {
+    print("Manual parallel block demonstration")
+    
+    // Explicit parallel execution
+    parallel {
+        let result1 = simple_compute(10)
+        let result2 = simple_compute(20)
+        let result3 = simple_compute(30)
+        
+        print("Parallel results:", result1, result2, result3)
+    }
+}
+
+fn performance_demo() {
+    print("=== Performance Demo ===")
+    
+    // Large array for automatic parallelization
+    let large_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    
+    print("Processing", len(large_numbers), "numbers in parallel...")
+    
+    let processed = map(large_numbers, simple_compute)
+    print("Processed results:", processed)
+    
+    let total = sum(processed)
+    print("Total sum:", total)
+}
+
+// Run examples
+print("=== TONG Parallel Computing Demo ===")
+parallel_array_processing()
+manual_parallel_block()
+performance_demo()

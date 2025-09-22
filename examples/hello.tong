@@ -1,0 +1,18 @@
+// Hello World in TONG
+// Demonstrates basic syntax and output
+
+fn main() {
+    print("Hello, TONG World!")
+    print("The ultimate programming language is here!")
+    
+    // Variables with type inference
+    let name = "TONG"
+    let version = 1.0
+    let is_awesome = true
+    
+    print("Language:", name)
+    print("Version:", version) 
+    print("Awesome:", is_awesome)
+}
+
+main()

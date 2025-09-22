@@ -1,0 +1,6 @@
+# TONG Programming Language Requirements
+# Core implementation uses only the Python standard library.
+# On Windows, add a readline-compatible library for REPL history/editing.
+
+# Windows-only: readline fallback for the REPL
+pyreadline3; platform_system == "Windows"

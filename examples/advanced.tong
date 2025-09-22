@@ -1,0 +1,68 @@
+// Advanced Features Demo
+// Shows off TONG's advanced programming capabilities
+
+fn advanced_data_structures() {
+    print("=== Advanced Data Structures ===")
+    
+    // Nested arrays (matrices)
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    print("Matrix:", matrix)
+    print("First row:", matrix[0])
+    print("Element [1][1]:", matrix[1][1])
+    
+    // Array of functions
+    let operations = [
+        |x| x + 1,
+        |x| x * 2,
+        |x| x * x
+    ]
+    
+    let value = 5
+    print("Value:", value)
+}
+
+fn higher_order_functions() {
+    print("=== Higher-Order Functions ===")
+    
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    
+    // Custom map implementation
+    fn my_map(array, func) {
+        let result = []
+        // TODO: Implement proper array construction in parser
+        return result
+    }
+    
+    // Function composition
+    fn compose(f, g) {
+        return |x| f(g(x))
+    }
+    
+    let add_one = |x| x + 1
+    let double = |x| x * 2
+    let add_one_then_double = compose(double, add_one)
+    
+    print("Composed function result:", add_one_then_double(5))
+}
+
+fn performance_showcase() {
+    print("=== Performance Showcase ===")
+    
+    // Large array processing with automatic parallelization
+    let large_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    
+    print("Processing", len(large_numbers), "numbers...")
+    
+    // This will automatically parallelize
+    let processed = map(large_numbers, |x| x * x + x - 1)
+    print("Processed:", processed)
+    
+    // Parallel sum
+    let total = sum(processed)
+    print("Total:", total)
+}
+
+// Run demonstrations
+advanced_data_structures()
+higher_order_functions()
+performance_showcase()
