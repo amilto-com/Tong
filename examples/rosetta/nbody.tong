@@ -1,0 +1,203 @@
+// N-Body Problem (3-body) - TONG example
+// Inspired by: https://rosettacode.org/wiki/N-body_problem
+// Notes:
+// - Uses simple Newtonian gravity with fixed time step
+// - Implemented with scalar variables due to limited array mutation in current TONG version
+
+// Square root via Newton-Raphson iteration
+fn sqrt(x) {
+    let guess = x
+    let i = 0
+    while i < 20 {
+        guess = 0.5 * (guess + x / guess)
+        i = i + 1
+    }
+    return guess
+}
+
+// Compute total energy (kinetic + potential)
+fn energy(x1, y1, z1, vx1, vy1, vz1, m1,
+          x2, y2, z2, vx2, vy2, vz2, m2,
+          x3, y3, z3, vx3, vy3, vz3, m3, G) {
+    // Kinetic energy
+    let ke1 = 0.5 * m1 * (vx1*vx1 + vy1*vy1 + vz1*vz1)
+    let ke2 = 0.5 * m2 * (vx2*vx2 + vy2*vy2 + vz2*vz2)
+    let ke3 = 0.5 * m3 * (vx3*vx3 + vy3*vy3 + vz3*vz3)
+
+    // Potential energy
+    let dx12 = x1 - x2
+    let dy12 = y1 - y2
+    let dz12 = z1 - z2
+    let r12 = sqrt(dx12*dx12 + dy12*dy12 + dz12*dz12)
+
+    let dx13 = x1 - x3
+    let dy13 = y1 - y3
+    let dz13 = z1 - z3
+    let r13 = sqrt(dx13*dx13 + dy13*dy13 + dz13*dz13)
+
+    let dx23 = x2 - x3
+    let dy23 = y2 - y3
+    let dz23 = z2 - z3
+    let r23 = sqrt(dx23*dx23 + dy23*dy23 + dz23*dz23)
+
+    let pe = -G * (m1*m2 / r12 + m1*m3 / r13 + m2*m3 / r23)
+
+    return ke1 + ke2 + ke3 + pe
+}
+
+// Advance the system by 'steps' using time step dt
+fn advance(steps, dt,
+           m1, m2, m3,
+           x1, y1, z1, vx1, vy1, vz1,
+           x2, y2, z2, vx2, vy2, vz2,
+           x3, y3, z3, vx3, vy3, vz3) {
+    let G = 39.47841760435743  // Gravitational constant in AU^3/(yr^2*solar_mass)
+
+    // Helper to compute accelerations from positions
+    fn compute_accels(x1, y1, z1, x2, y2, z2, x3, y3, z3, m1, m2, m3, G) {
+        // Distances and inverse r^3
+        let dx12 = x1 - x2
+        let dy12 = y1 - y2
+        let dz12 = z1 - z2
+        let d2_12 = dx12*dx12 + dy12*dy12 + dz12*dz12
+        let r12 = sqrt(d2_12)
+        let invr3_12 = 1.0 / (r12 * d2_12)
+
+        let dx13 = x1 - x3
+        let dy13 = y1 - y3
+        let dz13 = z1 - z3
+        let d2_13 = dx13*dx13 + dy13*dy13 + dz13*dz13
+        let r13 = sqrt(d2_13)
+        let invr3_13 = 1.0 / (r13 * d2_13)
+
+        let dx23 = x2 - x3
+        let dy23 = y2 - y3
+        let dz23 = z2 - z3
+        let d2_23 = dx23*dx23 + dy23*dy23 + dz23*dz23
+        let r23 = sqrt(d2_23)
+        let invr3_23 = 1.0 / (r23 * d2_23)
+
+        // Accelerations (a = -G * sum_j m_j (r_i - r_j)/r^3)
+        let ax1 = -G * ( m2 * dx12 * invr3_12 + m3 * dx13 * invr3_13 )
+        let ay1 = -G * ( m2 * dy12 * invr3_12 + m3 * dy13 * invr3_13 )
+        let az1 = -G * ( m2 * dz12 * invr3_12 + m3 * dz13 * invr3_13 )
+
+        let ax2 = -G * ( -m1 * dx12 * invr3_12 + m3 * dx23 * invr3_23 )
+        let ay2 = -G * ( -m1 * dy12 * invr3_12 + m3 * dy23 * invr3_23 )
+        let az2 = -G * ( -m1 * dz12 * invr3_12 + m3 * dz23 * invr3_23 )
+
+        let ax3 = -G * ( -m1 * dx13 * invr3_13 - m2 * dx23 * invr3_23 )
+        let ay3 = -G * ( -m1 * dy13 * invr3_13 - m2 * dy23 * invr3_23 )
+        let az3 = -G * ( -m1 * dz13 * invr3_13 - m2 * dz23 * invr3_23 )
+
+        // Pack into array for return
+        return [ax1, ay1, az1, ax2, ay2, az2, ax3, ay3, az3]
+    }
+
+    let s = 0
+    while s < steps {
+        // Compute current accelerations
+        let a = compute_accels(x1, y1, z1, x2, y2, z2, x3, y3, z3, m1, m2, m3, G)
+        let ax1 = a[0]
+        let ay1 = a[1]
+        let az1 = a[2]
+        let ax2 = a[3]
+        let ay2 = a[4]
+        let az2 = a[5]
+        let ax3 = a[6]
+        let ay3 = a[7]
+        let az3 = a[8]
+
+        // Update positions: r(t+dt) = r + v*dt + 0.5*a*dt^2
+        let dt2 = dt * dt * 0.5
+        x1 = x1 + dt * vx1 + dt2 * ax1
+        y1 = y1 + dt * vy1 + dt2 * ay1
+        z1 = z1 + dt * vz1 + dt2 * az1
+
+        x2 = x2 + dt * vx2 + dt2 * ax2
+        y2 = y2 + dt * vy2 + dt2 * ay2
+        z2 = z2 + dt * vz2 + dt2 * az2
+
+        x3 = x3 + dt * vx3 + dt2 * ax3
+        y3 = y3 + dt * vy3 + dt2 * ay3
+        z3 = z3 + dt * vz3 + dt2 * az3
+
+        // Compute new accelerations at t+dt
+        let a2 = compute_accels(x1, y1, z1, x2, y2, z2, x3, y3, z3, m1, m2, m3, G)
+        let ax1n = a2[0]
+        let ay1n = a2[1]
+        let az1n = a2[2]
+        let ax2n = a2[3]
+        let ay2n = a2[4]
+        let az2n = a2[5]
+        let ax3n = a2[6]
+        let ay3n = a2[7]
+        let az3n = a2[8]
+
+        // Update velocities: v(t+dt) = v + 0.5*(a + a_new)*dt
+        let halfdt = 0.5 * dt
+        vx1 = vx1 + halfdt * (ax1 + ax1n)
+        vy1 = vy1 + halfdt * (ay1 + ay1n)
+        vz1 = vz1 + halfdt * (az1 + az1n)
+
+        vx2 = vx2 + halfdt * (ax2 + ax2n)
+        vy2 = vy2 + halfdt * (ay2 + ay2n)
+        vz2 = vz2 + halfdt * (az2 + az2n)
+
+        vx3 = vx3 + halfdt * (ax3 + ax3n)
+        vy3 = vy3 + halfdt * (ay3 + ay3n)
+        vz3 = vz3 + halfdt * (az3 + az3n)
+
+        s = s + 1
+    }
+
+    // Print final state and energy
+    print("Final positions:")
+    print("1:", x1, y1, z1)
+    print("2:", x2, y2, z2)
+    print("3:", x3, y3, z3)
+    print("Energy:", energy(x1, y1, z1, vx1, vy1, vz1, m1,
+                            x2, y2, z2, vx2, vy2, vz2, m2,
+                            x3, y3, z3, vx3, vy3, vz3, m3, G))
+}
+
+// Initial conditions (loosely based on simplified Solar System 3-body subset)
+let m1 = 1.0        // Sun (solar masses)
+let m2 = 0.0009543  // Jupiter
+let m3 = 0.0002857  // Saturn
+
+// Positions (AU) and velocities (AU/year)
+let x1 = 0.0
+let y1 = 0.0
+let z1 = 0.0
+let vx1 = 0.0
+let vy1 = 0.0
+let vz1 = 0.0
+
+let x2 = 5.2
+let y2 = 0.0
+let z2 = 0.0
+let vx2 = 0.0
+let vy2 = 2.63
+let vz2 = 0.0
+
+let x3 = 9.5
+let y3 = 0.0
+let z3 = 0.0
+let vx3 = 0.0
+let vy3 = 2.03
+let vz3 = 0.0
+
+print("=== N-Body (3-body) Simulation ===")
+let G = 39.47841760435743
+print("Initial Energy:", energy(x1, y1, z1, vx1, vy1, vz1, m1,
+                               x2, y2, z2, vx2, vy2, vz2, m2,
+                               x3, y3, z3, vx3, vy3, vz3, m3, G))
+
+// Run simulation: steps, dt
+advance(2000, 0.001,
+        m1, m2, m3,
+        x1, y1, z1, vx1, vy1, vz1,
+        x2, y2, z2, vx2, vy2, vz2,
+        x3, y3, z3, vx3, vy3, vz3)
+

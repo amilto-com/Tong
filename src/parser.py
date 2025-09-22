@@ -111,6 +111,14 @@ class TongParser:
         
         # Expression statement
         else:
+            # Assignment statement: identifier '=' expression
+            if self.match(TokenType.IDENTIFIER) and self.peek() and self.peek().type == TokenType.ASSIGN:
+                name = self.current_token.value
+                self.advance()  # consume identifier
+                self.consume(TokenType.ASSIGN, "Expected '=' in assignment")
+                value = self.parse_expression()
+                return Assignment(Identifier(name), value)
+            
             expr = self.parse_expression()
             return ExpressionStatement(expr)
     
@@ -174,9 +182,14 @@ class TongParser:
         """Parse function parameter list"""
         parameters = []
         
+        # Allow newlines between parameters
         while not self.match(TokenType.RIGHT_PAREN) and self.current_token.type != TokenType.EOF:
+            self.skip_newlines()
+            if self.match(TokenType.RIGHT_PAREN):
+                break
             if parameters:
                 self.consume(TokenType.COMMA, "Expected ','")
+                self.skip_newlines()
             
             name_token = self.consume(TokenType.IDENTIFIER, "Expected parameter name")
             
@@ -515,9 +528,14 @@ class TongParser:
         """Parse function argument list"""
         args = []
         while not self.match(TokenType.RIGHT_PAREN) and self.current_token.type != TokenType.EOF:
+            self.skip_newlines()
+            if self.match(TokenType.RIGHT_PAREN):
+                break
             if args:
                 self.consume(TokenType.COMMA)
+                self.skip_newlines()
             args.append(self.parse_expression())
+            self.skip_newlines()
         return args
     
     def parse_lambda(self) -> Lambda:
