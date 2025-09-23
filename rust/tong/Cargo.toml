@@ -1,0 +1,23 @@
+[package]
+name = "tong"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+# Use logos 0.12 for simpler error handling with an Error variant
+logos = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+[dependencies.sdl3]
+version = "0.15.1"
+features = ["build-from-source"]
+optional = true
+
+[features]
+default = []
+# Enable a real SDL3 window/rendering backend instead of the headless shim
+sdl3 = ["dep:sdl3"]
+

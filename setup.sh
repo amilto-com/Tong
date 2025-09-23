@@ -1,27 +1,36 @@
-#!/bin/bash
-# TONG Programming Language Setup Script
+#!/usr/bin/env bash
+# TONG Programming Language Setup Script (Unix)
+
+set -euo pipefail
 
 echo "🚀 Setting up TONG - The Ultimate Programming Language"
 echo "=================================================="
 
-# Make main script executable
-chmod +x tong.py
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "❌ Rust toolchain not found. Please install Rust from https://rustup.rs and re-run this script."
+    exit 1
+fi
 
-# Create symlink for global access (optional)
+echo "Building tong (release)..."
+pushd rust/tong >/dev/null
+cargo build --release
+popd >/dev/null
+
+BIN="$(pwd)/rust/tong/target/release/tong"
 if [ "$1" = "--global" ]; then
     echo "Creating global symlink..."
-    sudo ln -sf "$(pwd)/tong.py" /usr/local/bin/tong
+    sudo ln -sf "$BIN" /usr/local/bin/tong
     echo "✅ TONG is now available globally as 'tong'"
 else
-    echo "Run './tong.py' to start TONG"
-    echo "Or run '$0 --global' to install globally"
+    echo "Built binary at: $BIN"
+    echo "You can run: $BIN examples/hello.tong"
 fi
 
 echo ""
 echo "🎯 Quick Start:"
-echo "  ./tong.py                    # Start REPL"
-echo "  ./tong.py examples/hello.tong # Run example"
-echo "  ./tong.py --help             # Show help"
+echo "  cargo run -p tong -- ../../examples/hello.tong    # Run example"
+echo "  cargo build -p tong --release                     # Build optimized binary"
+echo "  tong ../../examples/hello.tong                    # After --global install"
 echo ""
 echo "📚 Examples available in examples/ directory"
 echo "📖 See README.md for full documentation"

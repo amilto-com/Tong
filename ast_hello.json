@@ -1,0 +1,150 @@
+{
+  "type": "Program",
+  "statements": [
+    {
+      "type": "FunctionDeclaration",
+      "name": "main",
+      "parameters": [],
+      "return_type": null,
+      "body": [
+        {
+          "type": "ExpressionStatement",
+          "expression": {
+            "type": "FunctionCall",
+            "function": {
+              "type": "Identifier",
+              "name": "print"
+            },
+            "arguments": [
+              {
+                "type": "StringLiteral",
+                "value": "Hello, TONG World!"
+              }
+            ]
+          }
+        },
+        {
+          "type": "ExpressionStatement",
+          "expression": {
+            "type": "FunctionCall",
+            "function": {
+              "type": "Identifier",
+              "name": "print"
+            },
+            "arguments": [
+              {
+                "type": "StringLiteral",
+                "value": "The ultimate programming language is here!"
+              }
+            ]
+          }
+        },
+        {
+          "type": "VariableDeclaration",
+          "name": "name",
+          "type_annotation": null,
+          "initializer": {
+            "type": "StringLiteral",
+            "value": "TONG"
+          },
+          "is_mutable": false
+        },
+        {
+          "type": "VariableDeclaration",
+          "name": "version",
+          "type_annotation": null,
+          "initializer": {
+            "type": "FloatLiteral",
+            "value": 1.0
+          },
+          "is_mutable": false
+        },
+        {
+          "type": "VariableDeclaration",
+          "name": "is_awesome",
+          "type_annotation": null,
+          "initializer": {
+            "type": "BooleanLiteral",
+            "value": true
+          },
+          "is_mutable": false
+        },
+        {
+          "type": "ExpressionStatement",
+          "expression": {
+            "type": "FunctionCall",
+            "function": {
+              "type": "Identifier",
+              "name": "print"
+            },
+            "arguments": [
+              {
+                "type": "StringLiteral",
+                "value": "Language:"
+              },
+              {
+                "type": "Identifier",
+                "name": "name"
+              }
+            ]
+          }
+        },
+        {
+          "type": "ExpressionStatement",
+          "expression": {
+            "type": "FunctionCall",
+            "function": {
+              "type": "Identifier",
+              "name": "print"
+            },
+            "arguments": [
+              {
+                "type": "StringLiteral",
+                "value": "Version:"
+              },
+              {
+                "type": "Identifier",
+                "name": "version"
+              }
+            ]
+          }
+        },
+        {
+          "type": "ExpressionStatement",
+          "expression": {
+            "type": "FunctionCall",
+            "function": {
+              "type": "Identifier",
+              "name": "print"
+            },
+            "arguments": [
+              {
+                "type": "StringLiteral",
+                "value": "Awesome:"
+              },
+              {
+                "type": "Identifier",
+                "name": "is_awesome"
+              }
+            ]
+          }
+        }
+      ],
+      "is_async": false,
+      "is_gpu_kernel": false,
+      "is_distributed": false,
+      "generic_params": null
+    },
+    {
+      "type": "ExpressionStatement",
+      "expression": {
+        "type": "FunctionCall",
+        "function": {
+          "type": "Identifier",
+          "name": "main"
+        },
+        "arguments": []
+      }
+    }
+  ]
+}
