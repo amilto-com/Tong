@@ -4,7 +4,7 @@ use std::fs;
 mod lexer;
 mod parser;
 mod runtime;
-use runtime::Repl;
+use runtime::{Repl, builtin_modules, builtin_functions};
 
 #[derive(Parser)]
 #[command(name = "tong")]
@@ -13,10 +13,39 @@ use runtime::Repl;
 struct Cli {
     /// Path to a .tong source file to run (if omitted, starts interactive REPL)
     file: Option<String>,
+    /// List built-in modules and exit
+    #[arg(long)]
+    modules: bool,
+    /// Show extended version (git hash, build timestamp) and exit
+    #[arg(long)]
+    version_long: bool,
+    /// List core built-in functions and exit
+    #[arg(long)]
+    list_builtins: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if cli.version_long {
+        let hash = option_env!("GIT_HASH").unwrap_or("unknown");
+        let dirty = option_env!("GIT_DIRTY").unwrap_or("unknown");
+        let ts = option_env!("BUILD_UNIX").unwrap_or("0");
+        println!("tong {} (hash:{} {} build_ts:{})", env!("CARGO_PKG_VERSION"), hash, dirty, ts);
+        return Ok(());
+    }
+
+    if cli.list_builtins {
+        let funcs = builtin_functions().join(", ");
+        println!("Built-in functions: {}", funcs);
+        return Ok(());
+    }
+
+    if cli.modules {
+        let mods = builtin_modules().join(", ");
+        println!("Built-in modules: {}", mods);
+        return Ok(());
+    }
 
     if let Some(file) = cli.file {
         let src = fs::read_to_string(&file)?;
@@ -42,10 +71,14 @@ fn main() -> anyhow::Result<()> {
                     ":quit" | ":q" | ":exit" => break,
                     "quit" | "q" | "exit" => break,
                     ":help" => {
-                        println!(":quit/:q  exit  | :reset clear state | :env list vars | multi-line blocks supported (balanced {{ }})");
+                        println!(":quit/:q exit | :reset clear state | :env list vars | :modules list built-in modules | multi-line blocks supported (balanced {{ }})");
                     }
                     ":env" => {
                         for (k, v) in repl.list_vars() { println!("{} = {}", k, v); }
+                    }
+                    ":modules" => {
+                        let mods = builtin_modules().join(", ");
+                        println!("Built-in modules: {}", mods);
                     }
                     ":reset" => { repl.reset(); println!("(state cleared)"); }
                     other => println!("Unknown command {}", other),

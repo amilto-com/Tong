@@ -7,6 +7,18 @@ use std::time::Duration; // Duration used in sdl_delay
 
 use crate::parser::{BinOp, Expr, Program, Stmt};
 
+// Built-in module registry (update when adding more modules)
+pub fn builtin_modules() -> Vec<&'static str> { vec!["sdl", "linalg"] }
+
+// Core built-in functions (non-module) recognized directly by the evaluator.
+// Keep in sync with match arms in Expr::Call in eval_expr.
+pub fn builtin_functions() -> Vec<&'static str> {
+    // print is a statement in the AST but users expect it; include for discoverability.
+    let mut v = vec!["print", "len", "sum", "filter", "reduce", "map", "import"];
+    v.sort();
+    v
+}
+
 pub fn execute(program: Program) -> Result<()> {
     let mut env = Env::new();
 
