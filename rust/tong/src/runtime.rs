@@ -229,6 +229,8 @@ impl Env {
                                     let expr_args: Vec<Expr> =
                                         values.into_iter().map(|v| expr_from_value(&v)).collect();
                                     self.call_sdl_builtin(&name, expr_args)?
+                                } else if name.starts_with("linalg_") {
+                                    self.call_linalg_builtin_values(&name, values)?
                                 } else {
                                     self.call_function_values(name, values)?
                                 }
@@ -573,8 +575,11 @@ impl Env {
     }
     fn call_function(&mut self, name: String, args: Vec<Expr>) -> Result<Value> {
         // Built-in shims for SDL module
-        if name.starts_with("sdl_") {
-            return self.call_sdl_builtin(&name, args);
+        if name.starts_with("sdl_") { return self.call_sdl_builtin(&name, args); }
+        if name.starts_with("linalg_") {
+            // evaluate arguments to values and use values version
+            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+            return self.call_linalg_builtin_values(&name, evaled?);
         }
         let (params, body) = self
             .funcs
@@ -600,9 +605,8 @@ impl Env {
 
     // Function call with pre-evaluated values (avoids expr_from_value conversion issues for objects)
     fn call_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
-        if name.starts_with("sdl_") {
-            bail!("internal: call_function_values should not be used for SDL builtins");
-        }
+        if name.starts_with("sdl_") { bail!("internal: call_function_values should not be used for SDL builtins"); }
+        if name.starts_with("linalg_") { return self.call_linalg_builtin_values(&name, values); }
         let (params, body) = self
             .funcs
             .get(&name)
@@ -673,7 +677,12 @@ impl Env {
                 self.modules.insert(name.to_string(), v.clone());
                 Ok(v)
             }
-            other => bail!("unknown module '{}'; built-ins: sdl", other),
+            "linalg" => {
+                let v = self.import_linalg();
+                self.modules.insert(name.to_string(), v.clone());
+                Ok(v)
+            }
+            other => bail!("unknown module '{}'; built-ins: sdl, linalg", other),
         }
     }
 
@@ -757,6 +766,175 @@ impl Env {
                 "sdl_quit" => Ok(Value::Int(0)),
                 other => bail!("unknown SDL builtin {}", other),
             }
+        }
+    }
+}
+
+impl Env {
+    fn import_linalg(&mut self) -> Value {
+        let mut obj = HashMap::new();
+        // function refs
+        for (k, v) in [
+            ("zeros", "linalg_zeros"),
+            ("ones", "linalg_ones"),
+            ("tensor", "linalg_tensor"),
+            ("shape", "linalg_shape"),
+            ("rank", "linalg_rank"),
+            ("get", "linalg_get"),
+            ("set", "linalg_set"),
+            ("add", "linalg_add"),
+            ("sub", "linalg_sub"),
+            ("mul", "linalg_mul"),
+            ("dot", "linalg_dot"),
+            ("matmul", "linalg_matmul"),
+            ("transpose", "linalg_transpose"),
+        ] {
+            obj.insert(k.to_string(), Value::FuncRef(v.to_string()));
+        }
+        Value::Object(obj)
+    }
+
+    fn call_linalg_builtin_values(&mut self, name: &str, values: Vec<Value>) -> Result<Value> {
+        // helpers
+        fn to_usize_vec(v: &Value) -> Result<Vec<usize>> {
+            match v {
+                Value::Array(items) => items
+                    .iter()
+                    .map(|x| match x { Value::Int(i) if *i>=0 => Ok(*i as usize), _ => bail!("shape/index must be non-negative ints") })
+                    .collect(),
+                _ => bail!("expected array of ints"),
+            }
+        }
+        fn to_f64_vec(v: &Value) -> Result<Vec<f64>> {
+            match v {
+                Value::Array(items) => items
+                    .iter()
+                    .map(|x| match x { Value::Int(i) => Ok(*i as f64), Value::Float(f) => Ok(*f), _ => bail!("expected numeric array") })
+                    .collect(),
+                _ => bail!("expected numeric array"),
+            }
+        }
+        fn new_tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
+            let mut obj = HashMap::new();
+            obj.insert("__tensor__".to_string(), Value::Bool(true));
+            obj.insert(
+                "shape".to_string(),
+                Value::Array(shape.iter().map(|d| Value::Int(*d as i64)).collect()),
+            );
+            obj.insert(
+                "data".to_string(),
+                Value::Array(data.iter().map(|f| Value::Float(*f)).collect()),
+            );
+            Value::Object(obj)
+        }
+        fn is_tensor(v: &Value) -> Option<(Vec<usize>, Vec<f64>)> {
+            if let Value::Object(map) = v {
+                if let Some(Value::Bool(true)) = map.get("__tensor__") {
+                    if let (Some(Value::Array(shape_vals)), Some(Value::Array(data_vals))) = (map.get("shape"), map.get("data")) {
+                        let mut shape = Vec::new();
+                        for sv in shape_vals { if let Value::Int(i) = sv { shape.push(*i as usize); } else { return None; } }
+                        let mut data = Vec::new();
+                        for dv in data_vals { match dv { Value::Int(i)=> data.push(*i as f64), Value::Float(f)=> data.push(*f), _ => return None } }
+                        return Some((shape, data));
+                    }
+                }
+            }
+            None
+        }
+        fn numel(shape: &[usize]) -> usize { shape.iter().product() }
+        fn flat_index(shape:&[usize], idx:&[usize]) -> Result<usize> {
+            if shape.len()!=idx.len() { bail!("index rank mismatch"); }
+            let mut stride = 1usize;
+            let mut strides = vec![0; shape.len()];
+            for (i, d) in shape.iter().enumerate().rev() { strides[i] = stride; stride *= *d; }
+            let mut off = 0usize;
+            for (i,&ix) in idx.iter().enumerate() {
+                if ix>=shape[i] { bail!("index out of bounds"); }
+                off += ix*strides[i];
+            }
+            Ok(off)
+        }
+
+        match name {
+            "linalg_zeros" => {
+                if values.len()!=1 { bail!("zeros(shape) expects 1 arg"); }
+                let shape = to_usize_vec(&values[0])?; let n = numel(&shape);
+                Ok(new_tensor(vec![0.0; n], shape))
+            }
+            "linalg_ones" => {
+                if values.len()!=1 { bail!("ones(shape) expects 1 arg"); }
+                let shape = to_usize_vec(&values[0])?; let n = numel(&shape);
+                Ok(new_tensor(vec![1.0; n], shape))
+            }
+            "linalg_tensor" => {
+                if values.len()!=2 { bail!("tensor(data, shape) expects 2 args"); }
+                let data = to_f64_vec(&values[0])?;
+                let shape = to_usize_vec(&values[1])?;
+                if data.len()!= numel(&shape) { bail!("data length does not match shape"); }
+                Ok(new_tensor(data, shape))
+            }
+            "linalg_shape" => {
+                if values.len()!=1 { bail!("shape(t) expects 1 arg"); }
+                if let Some((shape,_)) = is_tensor(&values[0]) {
+                    Ok(Value::Array(shape.into_iter().map(|d| Value::Int(d as i64)).collect()))
+                } else { bail!("argument is not a tensor") }
+            }
+            "linalg_rank" => {
+                if values.len()!=1 { bail!("rank(t) expects 1 arg"); }
+                if let Some((shape,_)) = is_tensor(&values[0]) { Ok(Value::Int(shape.len() as i64)) } else { bail!("argument is not a tensor") }
+            }
+            "linalg_get" => {
+                if values.len()!=2 { bail!("get(t, idx) expects 2 args"); }
+                if let Some((shape,data)) = is_tensor(&values[0]) {
+                    let idxs = to_usize_vec(&values[1])?; let fi = flat_index(&shape,&idxs)?; Ok(Value::Float(data[fi]))
+                } else { bail!("argument is not a tensor") }
+            }
+            "linalg_set" => {
+                if values.len()!=3 { bail!("set(t, idx, v) expects 3 args"); }
+                if let Some((shape,mut data)) = is_tensor(&values[0]) {
+                    let idxs = to_usize_vec(&values[1])?; let fi = flat_index(&shape,&idxs)?;
+                    let val = match &values[2] { Value::Int(i)=> *i as f64, Value::Float(f)=> *f, _ => bail!("value must be numeric") };
+                    data[fi] = val; Ok(new_tensor(data, shape))
+                } else { bail!("argument is not a tensor") }
+            }
+            "linalg_add" | "linalg_sub" | "linalg_mul" => {
+                if values.len()!=2 { bail!("binary elementwise expects 2 args"); }
+                let (shape_a, data_a) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (shape_b, data_b) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if shape_a != shape_b { bail!("shape mismatch"); }
+                let data: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(a,b)| match name { "linalg_add" => a + b, "linalg_sub" => a - b, _ => a * b }).collect();
+                Ok(new_tensor(data, shape_a))
+            }
+            "linalg_dot" => {
+                if values.len()!=2 { bail!("dot(a,b) expects 2 args"); }
+                let (shape_a, data_a) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (shape_b, data_b) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if shape_a.len()!=1 || shape_b.len()!=1 { bail!("dot expects 1-D tensors"); }
+                if shape_a[0] != shape_b[0] { bail!("length mismatch"); }
+                let mut s=0.0; for (a,b) in data_a.iter().zip(data_b.iter()) { s += a*b; }
+                Ok(Value::Float(s))
+            }
+            "linalg_matmul" => {
+                if values.len()!=2 { bail!("matmul(a,b) expects 2 args"); }
+                let (sa, da) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (sb, db) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if sa.len()!=2 || sb.len()!=2 { bail!("matmul expects 2-D tensors"); }
+                if sa[1] != sb[0] { bail!("inner dimension mismatch"); }
+                let (m,k,n) = (sa[0], sa[1], sb[1]);
+                let mut out = vec![0.0; m*n];
+                for i in 0..m { for j in 0..n { let mut acc=0.0; for p in 0..k { acc += da[i*k + p]* db[p*n + j]; } out[i*n + j] = acc; } }
+                Ok(new_tensor(out, vec![m,n]))
+            }
+            "linalg_transpose" => {
+                if values.len()!=1 { bail!("transpose(a) expects 1 arg"); }
+                let (s, d) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("argument not tensor"))?;
+                if s.len()!=2 { bail!("transpose expects rank-2 tensor"); }
+                let (m,n) = (s[0], s[1]);
+                let mut out = vec![0.0; m*n];
+                for i in 0..m { for j in 0..n { out[j*m + i] = d[i*n + j]; } }
+                Ok(new_tensor(out, vec![s[1], s[0]]))
+            }
+            _ => bail!("unknown linalg builtin {}", name),
         }
     }
 }
