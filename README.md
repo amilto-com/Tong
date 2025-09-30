@@ -246,6 +246,14 @@ Commands:
 :quit   Exit the REPL (:q / :exit also work)
 ```
 
+CLI discovery:
+
+```bash
+tong --modules   # list built-in modules (e.g. sdl, linalg)
+tong --version-long  # extended version with git hash and build timestamp
+tong --list-builtins # list core built-in functions (print, len, sum, map, filter, reduce, import)
+```
+
 Multi-line input: start a block with `{` (e.g. a function definition) and the prompt switches to `....` until braces balance.
 
 Bare expressions echo their value automatically; use `print()` for formatted multi-value output.
@@ -258,6 +266,59 @@ Bare expressions echo their value automatically; use `print()` for formatted mul
 - `map(array, funcName)` - Map function over array using a named function
 - `filter(array, funcName)` - Keep elements for which the named function returns true
 - `reduce(array, funcName, initial)` - Fold array with a named function taking (acc, item)
+
+## Linear Algebra (Tensor) Module
+
+Import the `linalg` module for basic multidimensional tensor support (MVP prototype):
+
+```tong
+let l = import("linalg")
+let a = l.ones([2,2])
+let b = l.ones([2,2])
+let c = l.add(a,b)
+print(l.shape(c))      // [2, 2]
+print(l.get(c,[0,0]))  // 2.0
+```
+
+Provided functions:
+
+| Function | Description |
+|----------|-------------|
+| `l.zeros(shape)` | Create tensor of zeros |
+| `l.ones(shape)` | Create tensor of ones |
+| `l.tensor(data, shape)` | Create tensor from flat numeric data and explicit shape |
+| `l.shape(t)` | Returns shape array (e.g. `[2,3]`) |
+| `l.rank(t)` | Returns rank (number of dimensions) |
+| `l.get(t, idx)` | Get element at index list (e.g. `[i,j]`) |
+| `l.set(t, idx, v)` | Returns a new tensor with element updated (immutable style) |
+| `l.add(a,b)` | Elementwise addition (same shape) |
+| `l.sub(a,b)` | Elementwise subtraction |
+| `l.mul(a,b)` | Elementwise multiplication |
+| `l.dot(a,b)` | Dot product of 1-D tensors (vectors) |
+| `l.matmul(a,b)` | Matrix multiply rank‑2 tensors (m×k)·(k×n) -> (m×n) |
+| `l.transpose(a)` | Transpose rank‑2 tensor |
+
+Notes / Constraints (current MVP):
+
+* All numeric values are stored as `f64` internally (ints are promoted on construction).
+* No broadcasting yet — shapes must match for elementwise ops.
+* `set` returns a new tensor (persistent style); no in‑place mutation.
+* Only rank‑2 transpose is implemented now.
+* Error messages are intentionally simple; richer diagnostics planned.
+
+Example (see `examples/tensor.tong`):
+
+```tong
+let l = import("linalg")
+let d = l.tensor([1,2,3,4],[2,2])
+let e = l.transpose(d)
+let f = l.matmul(d,e)
+print(l.shape(f))            // [2, 2]
+print(l.get(f,[0,0]))        // 5.0  (1*1 + 2*2)
+print(l.get(f,[0,1]))        // 11.0 (1*3 + 2*4)
+```
+
+Planned next steps: broadcasting, slicing, reshaping, and sparse representations.
 
 ## Architecture
 
