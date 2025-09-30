@@ -230,8 +230,25 @@ distributed fn process_big_data(data) {
 ```
 
 ## REPL
+Run without a file to enter the interactive REPL:
 
-The Rust MVP currently runs .tong files. An interactive REPL is on the roadmap.
+```bash
+cd rust/tong
+cargo run --features sdl3 --   # or omit feature if you don't need graphics
+```
+
+Commands:
+
+```
+:help   Show help
+:env    List current variables
+:reset  Clear all user-defined variables and functions
+:quit   Exit the REPL (:q / :exit also work)
+```
+
+Multi-line input: start a block with `{` (e.g. a function definition) and the prompt switches to `....` until braces balance.
+
+Bare expressions echo their value automatically; use `print()` for formatted multi-value output.
 
 ## Built-in Functions (MVP)
 

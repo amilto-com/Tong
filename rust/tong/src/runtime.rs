@@ -761,6 +761,97 @@ impl Env {
     }
 }
 
+// ---------------- REPL SUPPORT (public minimal API) -----------------
+pub struct Repl {
+    env: Env,
+}
+
+impl Repl {
+    pub fn new() -> Self {
+        Self { env: Env::new() }
+    }
+
+    // Evaluate a source snippet, returning an optional printable value (final bare expression)
+    pub fn eval_snippet(&mut self, src: &str) -> Result<Option<String>> {
+        // Lex & parse new snippet each time; keep accumulated functions / vars
+    let tokens = crate::lexer::lex(src)?;
+        let program = crate::parser::parse(tokens)?;
+
+        // First collect function/main definitions without clearing existing ones
+        for stmt in &program.stmts {
+            if let Stmt::FnDef(name, params, body) = stmt {
+                self.env
+                    .funcs
+                    .insert(name.clone(), (params.clone(), body.clone()));
+            }
+            if let Stmt::FnMain(body) = stmt {
+                self.env
+                    .funcs
+                    .insert("main".to_string(), (Vec::new(), body.clone()));
+            }
+        }
+
+        // Execute non-function statements; remember last expression value if it was a bare Expr stmt
+        let mut last_expr: Option<Value> = None;
+        for stmt in &program.stmts {
+            match stmt {
+                Stmt::Import(name, module) => {
+                    let v = self.env.import_module(module)?;
+                    self.env.vars_mut().insert(name.clone(), v);
+                }
+                Stmt::Let(name, expr) => {
+                    let v = self.env.eval_expr(expr.clone())?;
+                    self.env.vars_mut().insert(name.clone(), v);
+                }
+                Stmt::Assign(name, expr) => {
+                    let v = self.env.eval_expr(expr.clone())?;
+                    self.env.vars_mut().insert(name.clone(), v);
+                }
+                Stmt::Print(args) => {
+                    let parts: Result<Vec<String>> = args
+                        .iter()
+                        .cloned()
+                        .map(|e| self.env.eval_expr(e).map(|v| format_value(&v)))
+                        .collect();
+                    println!("{}", parts?.join(" "));
+                    last_expr = None; // print supersedes expression echo
+                }
+                Stmt::Expr(e) => {
+                    let v = self.env.eval_expr(e.clone())?;
+                    last_expr = Some(v);
+                }
+                _ => {
+                    // control flow / while / if at top-level are executed via exec_stmt path
+                    // For simplicity reuse exec_stmt for those
+                    match stmt {
+                        Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
+                            let _ = self.env.exec_stmt(stmt)?;
+                            last_expr = None;
+                        }
+                        Stmt::FnDef(..) | Stmt::FnMain(..) => {}
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(last_expr.map(|v| format_value(&v)))
+    }
+
+    pub fn list_vars(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (k, v) in self.env.vars() {
+            if k.starts_with("__") { continue; }
+            out.push((k.clone(), format_value(v)));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    pub fn reset(&mut self) {
+        self.env = Env::new();
+    }
+}
+
 #[cfg(feature = "sdl3")]
 struct SdlState {
     _sdl: sdl3::Sdl,
@@ -950,7 +1041,8 @@ impl Env {
     }
 }
 
-// Helper conversions for Value to numeric types
+// Helper conversions for Value to numeric types (only needed when SDL backend active)
+#[cfg(feature = "sdl3")]
 impl Value {
     fn as_int_u8(&self) -> Result<u8> {
         match self {
