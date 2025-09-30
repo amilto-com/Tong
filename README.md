@@ -104,6 +104,70 @@ cargo build --features sdl3
 .\target\debug\tong.exe ..\..\examples\modules\sdl\pong.tong
 ```
 
+### Linux / WSL (SDL3 example)
+
+If you run `pong.tong` and NO window appears, you almost certainly built without the `sdl3` feature. Without that feature, the runtime uses a headless shim (no real window) so CI/tests can pass. Re‑build with the feature enabled.
+
+```bash
+cd rust/tong
+# Debug run
+cargo run --features sdl3 -- ../../examples/modules/sdl/pong.tong
+
+# Or build release
+cargo build --release --features sdl3
+../../target/release/tong ../../examples/modules/sdl/pong.tong
+```
+
+#### WSL specifics
+
+WSL2 with WSLg (Windows 11, or updated Windows 10) supports Wayland/X11 out of the box. Just enabling the feature is usually enough. Verify GUI support with:
+
+```bash
+echo $WAYLAND_DISPLAY  # should be non-empty on WSLg
+```
+
+If you are on older WSL1 (or WSL2 without WSLg) you need an external Windows X server (VcXsrv/Xming) and to export DISPLAY, e.g.:
+
+```bash
+export DISPLAY=$(ip route | awk '/default/ {print $3}'):0
+export LIBGL_ALWAYS_INDIRECT=1   # sometimes needed for legacy setups
+```
+
+Then run the program again with the `sdl3` feature.
+
+#### Dependencies for building SDL3 from source
+
+The crate enables `features = ["build-from-source"]` for `sdl3`, so it will compile SDL3 locally. Make sure you have build tools and common video/audio dev packages:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build pkg-config \
+    libwayland-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
+    libxcursor-dev libxi-dev libdrm-dev libgbm-dev libpulse-dev
+```
+
+You can start with fewer packages; these cover most headless → window build failures. If the build still fails, check the first missing library mentioned by the SDL build logs.
+
+#### Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| No window, program exits after a moment | Forgot `--features sdl3` | Re-run with feature |
+| Build error about missing C compiler | No build tools | `sudo apt install build-essential` |
+| Runtime: Cannot open display | WSL1 without X server | Install & start VcXsrv, set DISPLAY |
+| Black window only | Rendering loop running but drawing state stuck | Ensure `present` is called (it is in example); try `SDL_VIDEODRIVER=x11` or `wayland` |
+
+You can force a specific backend:
+
+```bash
+SDL_VIDEODRIVER=wayland cargo run --features sdl3 -- ../../examples/modules/sdl/pong.tong
+# or
+SDL_VIDEODRIVER=x11 cargo run --features sdl3 -- ../../examples/modules/sdl/pong.tong
+```
+
+If all else fails, run with `RUST_LOG=debug` after adding some debug prints (or temporarily instrument `runtime.rs`) to confirm the SDL path is actually compiled (look for `#[cfg(feature = "sdl3")]`).
+
+
 ## Language Examples
 
 ### Hello World

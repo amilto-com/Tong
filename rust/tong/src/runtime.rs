@@ -1,6 +1,9 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use std::collections::HashMap;
-use std::time::Duration;
+#[cfg(feature = "sdl3")]
+use anyhow::anyhow; // anyhow! macro for SDL code paths
+#[cfg(feature = "sdl3")]
+use std::time::Duration; // Duration used in sdl_delay
 
 use crate::parser::{BinOp, Expr, Program, Stmt};
 
@@ -676,6 +679,14 @@ impl Env {
 
     fn import_sdl(&mut self) -> Value {
         let mut obj = HashMap::new();
+        #[cfg(not(feature = "sdl3"))]
+        {
+            // Provide a one-time notice that this build is headless for SDL.
+            if !self.modules.contains_key("__sdl_notice_shown") {
+                eprintln!("[TONG][SDL] Built without 'sdl3' feature: using headless shim (no real window). Rebuild with --features sdl3 for graphics.");
+                self.modules.insert("__sdl_notice_shown".to_string(), Value::Bool(true));
+            }
+        }
         // constants
         obj.insert("K_ESCAPE".to_string(), Value::Int(27));
         obj.insert("K_Q".to_string(), Value::Int(81));
