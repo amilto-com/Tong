@@ -1,0 +1,6 @@
+// set returns a new tensor (immutability style)
+let l = import("linalg")
+let a = l.zeros([2,2])
+let b = l.set(a,[1,1], 42)
+print("a (1,1):", l.get(a,[1,1]))  // still 0
+print("b (1,1):", l.get(b,[1,1]))  // 42

@@ -1,0 +1,7 @@
+// Matrix multiply
+let l = import("linalg")
+let a = l.tensor([1,2,3,4],[2,2])
+let b = l.tensor([5,6,7,8],[2,2])
+let c = l.matmul(a,b)
+print("shape:", l.shape(c))
+print(l.get(c,[0,0]), l.get(c,[0,1]), l.get(c,[1,0]), l.get(c,[1,1]))

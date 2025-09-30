@@ -1,0 +1,10 @@
+// Elementwise operations
+let l = import("linalg")
+let a = l.ones([2,2])
+let b = l.tensor([2,4,6,8],[2,2])
+let add = l.add(a,b)
+let sub = l.sub(b,a)
+let mul = l.mul(a,b)
+print("add (1,1):", l.get(add,[1,1]))
+print("sub (0,0):", l.get(sub,[0,0]))
+print("mul (0,1):", l.get(mul,[0,1]))

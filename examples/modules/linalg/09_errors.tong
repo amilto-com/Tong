@@ -1,0 +1,6 @@
+// Intentional errors (uncomment to test)
+let l = import("linalg")
+// l.add(l.ones([2,2]), l.ones([3,3]))  // shape mismatch
+// l.dot(l.ones([2,2]), l.ones([2,2]))   // rank error
+// l.get(l.ones([2,2]), [2,0])           // out of bounds
+print("(All error lines are commented out)")

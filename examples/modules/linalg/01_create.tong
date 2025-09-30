@@ -1,0 +1,8 @@
+// Creating basic tensors
+let l = import("linalg")
+let z = l.zeros([2,3])
+let o = l.ones([2,3])
+print("zeros shape:", l.shape(z))
+print("ones rank:", l.rank(o))
+print("element (1,2) zeros:", l.get(z,[1,2]))
+print("element (0,0) ones:", l.get(o,[0,0]))

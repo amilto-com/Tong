@@ -1,0 +1,9 @@
+// Chaining operations: (A + B) * (A - B) via elementwise ops then matmul
+let l = import("linalg")
+let A = l.tensor([1,2,3,4],[2,2])
+let B = l.ones([2,2])
+let ApB = l.add(A,B)
+let AmB = l.sub(A,B)
+let prod = l.matmul(ApB, l.transpose(AmB))
+print("shape:", l.shape(prod))
+print(l.get(prod,[0,0]), l.get(prod,[0,1]), l.get(prod,[1,0]), l.get(prod,[1,1]))

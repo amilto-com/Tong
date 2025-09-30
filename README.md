@@ -348,6 +348,8 @@ The `examples/` directory contains demonstration programs:
 - `advanced.tong` - Advanced language features
 Additional examples and Rosetta tasks will be added as the Rust implementation evolves.
 
+Tensor / Linear Algebra examples: see `examples/modules/linalg/` for focused `linalg` module demonstrations (creation, elementwise ops, dot, matmul, transpose, immutability).
+
 ## Performance
 
 TONG automatically optimizes code for performance:
