@@ -1,4 +1,4 @@
-<#!
+<#
 Runs .tong examples with feature parity to scripts/run_examples.sh
 
 Usage examples:
@@ -15,11 +15,12 @@ Parameters:
 
 Environment:
   TONG  If set, used as the tong executable path (unless -TongExe provided)
-!>
+#>
 param(
     [string]$TongExe,
     [switch]$All,
     [switch]$Rosetta,
+    [switch]$Sdl,
     [switch]$Help
 )
 
@@ -34,6 +35,7 @@ Parameters:
   -TongExe <path>  Use a specific tong executable
   -All             Include module examples (examples/modules/**)
   -Rosetta         Only rosetta examples (examples/rosetta/*.tong)
+    -Sdl             Build (release) with SDL3 feature before running
   -Help            Show this help
 
 Environment:
@@ -49,8 +51,22 @@ Exit codes:
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $examplesDir = Join-Path $root "examples"
 
-# Determine tong executable precedence: -TongExe > $env:TONG > candidate probing > build
+# Determine tong executable precedence: -TongExe > -Sdl build > $env:TONG > candidate probing > build
 if (-not $TongExe -and $env:TONG) { $TongExe = $env:TONG }
+
+# If -Sdl specified and no explicit -TongExe, build a release binary with sdl3 feature
+if ($Sdl -and -not $TongExe) {
+    Write-Host "[info] Building tong (release, sdl3 feature)..." -ForegroundColor Yellow
+    Push-Location (Join-Path $root "rust/tong")
+    try {
+        cargo build --release --features sdl3 | Out-Null
+    }
+    finally { Pop-Location | Out-Null }
+    $TongExe = (Join-Path $root "rust/tong/target/release/tong.exe")
+}
+elseif ($Sdl -and $TongExe) {
+    Write-Host "[warn] -Sdl specified but -TongExe provided; assuming supplied binary already has SDL support." -ForegroundColor Yellow
+}
 
 if (-not $TongExe) {
     $candidates = @(
@@ -104,7 +120,7 @@ if ($files.Count -eq 0) {
 }
 
 foreach ($f in $files) {
-    $rel = $f.FullName.Substring($examplesDir.Length).TrimStart('\\','/')
+    $rel = $f.FullName.Substring($examplesDir.Length) -replace '^[\\/]+',''
     Write-Host "`n=== Running $rel ===" -ForegroundColor Cyan
     & $TongExe $f.FullName
     if ($LASTEXITCODE -ne 0) {
@@ -113,4 +129,4 @@ foreach ($f in $files) {
     }
 }
 
-Write-Host "`nAll selected examples completed successfully." -ForegroundColor Green
+    Write-Host "`nAll selected examples completed successfully." -ForegroundColor Green

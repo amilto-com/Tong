@@ -3,16 +3,25 @@
 TONG Programming Language Setup Script (Windows / PowerShell)
 
 Usage:
-  pwsh .\setup.ps1            # Show usage and quick start
-  pwsh .\setup.ps1 -Global    # Create a 'tong' command in your PATH (user scope)
+    pwsh .\setup.ps1                # Build (release) and show quick start
+    pwsh .\setup.ps1 -Global        # Build (release) and add a 'tong' shim in PATH
+    pwsh .\setup.ps1 -Sdl           # Build with SDL3 feature enabled
+    pwsh .\setup.ps1 -Sdl -Global   # Build with SDL3 + install shim
+    pwsh .\setup.ps1 -Quiet         # Suppress non-error output
 
-This mirrors setup.sh behavior on Windows. No admin rights required.
+Flags:
+    -Global  : Adds a user-scope PATH shim (no admin needed) similar to --global in setup.sh
+    -Sdl     : Enables the 'sdl3' cargo feature (equivalent to ./setup.sh --sdl)
+    -Quiet   : Reduce output (errors still shown)
+
+This mirrors setup.sh behavior on Windows while using a PowerShell shim instead of a symlink.
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Global,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [Alias('Sdl3')][switch]$Sdl
 )
 
 function Write-Info($msg) {
@@ -27,7 +36,29 @@ try {
     # Ensure Rust is available
     $cargo = Get-Command cargo -ErrorAction SilentlyContinue
     if (-not $cargo) {
-        Write-Warning "Rust toolchain not found. Please install Rust from https://rustup.rs and re-run this script."
+        Write-Error "❌ Rust toolchain not found. Please install Rust from https://rustup.rs and re-run this script."
+        exit 1
+    }
+
+    # Build the Rust project (release) with optional SDL feature
+    Push-Location (Join-Path $repoRoot 'rust' 'tong')
+    try {
+        $featureArgs = @()
+        if ($Sdl) {
+            Write-Info "(enabling SDL3 feature)"
+            $featureArgs += '--features'; $featureArgs += 'sdl3'
+        }
+        Write-Info "Building tong (release)..."
+        cargo build --release @featureArgs
+    }
+    finally {
+        Pop-Location
+    }
+
+    $releaseExe = Join-Path $repoRoot 'rust\tong\target\release\tong.exe'
+    if (-not (Test-Path $releaseExe)) {
+        Write-Error "Build did not produce $releaseExe"
+        exit 1
     }
 
     if ($Global) {
@@ -99,18 +130,29 @@ exit 1
 
         Write-Info "✅ TONG is now available as 'tong' (tong.ps1) in new PowerShell sessions"
         Write-Info "   Try: tong --version"
+        Write-Info "Built binary at: $releaseExe"
     }
     else {
-        Write-Info "Rust-based TONG detected. You can run via:"
-        Write-Info "  cargo run --release -p tong -- (path to .tong file)"
-        Write-Info "Or run 'pwsh .\\setup.ps1 -Global' to install a 'tong' command in your PATH"
+        Write-Info "Built binary at: $releaseExe"
+        Write-Info "Run: $releaseExe examples\hello.tong"
+        Write-Info "Or: cargo run --release -p tong -- examples/hello.tong"
+        if ($Sdl) {
+            Write-Info "(SDL3 feature enabled in this build)"
+        } else {
+            Write-Info "To enable SDL3 feature: pwsh .\\setup.ps1 -Sdl [-Global]"
+        }
+        Write-Info "Install shim for easy access: pwsh .\\setup.ps1 -Global"
     }
 
     Write-Host ""
     Write-Host "🎯 Quick Start:"
-    Write-Host "  cargo run -p tong -- ../../examples/hello.tong   # Run example"
-    Write-Host "  cargo build -p tong --release                   # Build optimized binary"
-    Write-Host "  tong ../../examples/hello.tong                  # After -Global shim install"
+    Write-Host "  cargo run -p tong -- ../../examples/hello.tong        # Run example"
+    Write-Host "  cargo build -p tong --release                        # Build optimized binary"
+    Write-Host "  tong ../../examples/hello.tong                       # After -Global shim install"
+    Write-Host ""
+    Write-Host "🖼  SDL Pong example (needs feature):"
+    Write-Host "  cargo run --release --features sdl3 -- ../../examples/modules/sdl/pong.tong"
+    Write-Host "  pwsh .\\setup.ps1 -Sdl -Global   # install shim with SDL3-enabled binary"
     Write-Host ""
     Write-Host "📚 Examples available in examples/ directory"
     Write-Host "📖 See README.md for full documentation"
