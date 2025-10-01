@@ -14,10 +14,17 @@ Included tasks:
 - N-body problem (3-body, velocity Verlet)
 - Towers of Hanoi
 
-Run any example, e.g.:
+Run any example, e.g. FizzBuzz:
 
+From the Rust crate directory:
 ```
-python tong.py examples/rosetta/fizzbuzz.tong
+cd rust/tong
+cargo run -- ../../examples/rosetta/fizzbuzz.tong
+```
+
+After installing the binary globally (via `./setup.sh --global`):
+```
+tong examples/rosetta/fizzbuzz.tong
 ```
 
 Notes:

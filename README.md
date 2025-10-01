@@ -348,7 +348,10 @@ The `examples/` directory contains demonstration programs:
 - `advanced.tong` - Advanced language features
 Additional examples and Rosetta tasks will be added as the Rust implementation evolves.
 
-Tensor / Linear Algebra examples: see `examples/modules/linalg/` for focused `linalg` module demonstrations (creation, elementwise ops, dot, matmul, transpose, immutability).
+Module examples live under `examples/modules/`:
+- `linalg` – tensors (creation, elementwise ops, dot, matmul, transpose, immutability, chaining)
+- `sdl` – SDL3 Pong demo (graphics/input; requires `--features sdl3`)
+See `examples/modules/README.md` for the index.
 
 ## Performance
 
