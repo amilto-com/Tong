@@ -268,6 +268,44 @@ Recent improvements:
 * Implicit last-expression return in function bodies (you can omit `return` for final expression).
 * Short-circuit logical operators `&`, `||`, and unary `!`.
 * Array element update sugar `arr[i] = expr` (immutably rebuilds array with updated slot).
+* Explicit block expressions `{ stmt* }` evaluate to the last expression value.
+* First-class anonymous `fn` with block bodies `let f = fn a b { let c = a + b; c * 2 }`.
+* Indexing expressions `arr[i]` and chaining with other postfix forms (`{ [1,2,3] }[0]`).
+
+### Block Expressions
+
+TONG supports block expressions as values: a brace-delimited sequence of statements that yields the value of its final bare expression (if any). This enables inline scoping and multi-step computations inside larger expressions.
+
+Example:
+```tong
+let result = {
+    let a = 10
+    let b = a * 3
+    b + 7   // last expression becomes the block value (37)
+}
+print(result)
+```
+Semantics:
+* All `let` / assignment statements inside the block are scoped to the block.
+* If the block ends with a bare `Expr` statement, its value is returned; otherwise the block yields an empty array `[]` for now (placeholder “unit”).
+* Blocks compose with other postfix operators: `{ [100,200,300] }[1]` -> `200`.
+
+Anonymous function literals (`fn ... { ... }`) reuse block expression semantics so multi-statement function bodies can be written inline without defining a named function.
+
+### Indexing & Postfix Chaining
+
+Indexing is an expression form with the highest precedence tier (alongside call/property). It can be chained arbitrarily:
+```tong
+let grid = [[1,2],[3,4]]
+print(grid[1][0])      // 3
+{ [10,20,30] }[2]      // 30 (inside larger expression if desired)
+```
+Rules:
+* Index expression `target[index]` evaluates `target` then `index` (left-to-right) and expects an array / list.
+* Out-of-bounds access triggers a runtime error.
+* Indexing works on the result of any expression, including constructor calls, lambdas returning arrays, or block expressions.
+
+Array update sugar (`arr[i] = expr`) is statement-level and distinct from expression indexing: it produces an updated array value immutably (clones underlying vector and writes the slot).
 
 ### Operator Precedence (Highest → Lowest)
 

@@ -57,6 +57,16 @@ let arr = [0,1,2]
 arr[1] = arr[1] + 10
 print("arr", arr[0], arr[1], arr[2])
 
+# anonymous fn with block and nested indexing
+let make = fn a b {
+  let c = a + b
+  let d = c * 2
+  d + 1
+}
+print("make", make(2,3))
+let grid = [[1,2],[3,4]]
+print("grid10", grid[1][0])
+
 # match with guard
 match Just(42) { Just(v) if v > 40 -> print("matchJ", v), Nothing -> print("matchN") }
 
