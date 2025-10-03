@@ -9,7 +9,7 @@ data Direction = Up | Down | None
 
 data Side = Left | Right
 
-data Outcome = Continue state | Scored side new_state | Quit state
+// Outcome removed for simplicity; simulation returns updated Game directly
 
 // Immutable game state record encoded as a constructor
 // We emulate a record via positional constructor; commentary indicates fields:
@@ -43,7 +43,7 @@ fn clamp(v, lo, hi) { if v < lo { lo } else { if v > hi { hi } else { v } } }
 fn reset_ball(state, vx_sign) {
   let vx = init_ball_vx() * vx_sign
   let vy = init_ball_vy()
-  Game(width()/2, height()/2, vx, vy, state.p1y, state.p2y, state.s1, state.s2, state.running)
+  Game(width()/2, height()/2, vx, vy, p1y(state), p2y(state), s1(state), s2(state), is_running(state))
 }
 
 // Pattern clause accessors for readability (since we used positional constructor)
@@ -110,27 +110,41 @@ fn wall_bounce(state) {
 }
 
 fn paddle_collision_left(state) {
-  if vx(state) >= 0 { state } else {
+  if vx(state) >= 0 {
+    state
+  } else {
     let bx = ball_x(state)
     let by = ball_y(state)
     let p1x = 20
     let overlap_x = bx <= p1x + paddle_w()
-    let overlap_y = by + ball_size() >= p1y(state) && by <= p1y(state) + paddle_h()
-    if overlap_x && overlap_y {
-      with_ball(state, p1x + paddle_w(), by, -vx(state), vy(state))
+    let overlap_y_part1 = by + ball_size() >= p1y(state)
+    let overlap_y_part2 = by <= p1y(state) + paddle_h()
+    let overlap_y_flag = 0
+    if overlap_y_part1 { if overlap_y_part2 { overlap_y_flag = 1 } }
+    if overlap_x {
+      if overlap_y_flag == 1 {
+        with_ball(state, p1x + paddle_w(), by, -vx(state), vy(state))
+      } else { state }
     } else { state }
   }
 }
 
 fn paddle_collision_right(state) {
-  if vx(state) <= 0 { state } else {
+  if vx(state) <= 0 {
+    state
+  } else {
     let bx = ball_x(state)
     let by = ball_y(state)
     let p2x = width() - 20 - paddle_w()
     let overlap_x = bx + ball_size() >= p2x
-    let overlap_y = by + ball_size() >= p2y(state) && by <= p2y(state) + paddle_h()
-    if overlap_x && overlap_y {
-      with_ball(state, p2x - ball_size(), by, -vx(state), vy(state))
+    let overlap_y_part1 = by + ball_size() >= p2y(state)
+    let overlap_y_part2 = by <= p2y(state) + paddle_h()
+    let overlap_y_flag = 0
+    if overlap_y_part1 { if overlap_y_part2 { overlap_y_flag = 1 } }
+    if overlap_x {
+      if overlap_y_flag == 1 {
+        with_ball(state, p2x - ball_size(), by, -vx(state), vy(state))
+      } else { state }
     } else { state }
   }
 }
@@ -139,12 +153,16 @@ fn scoring(state) {
   let bx = ball_x(state)
   if bx < 0 {
     let ns = with_scores(state, s1(state), s2(state)+1)
-    Scored Right (reset_ball(ns, 1))
+    let rb = reset_ball(ns, 1)
+    print("Score:", s1(rb), "-", s2(rb))
+    rb
   } else {
     if bx > width() {
       let ns = with_scores(state, s1(state)+1, s2(state))
-      Scored Left (reset_ball(ns, -1))
-    } else { Continue state }
+      let rb = reset_ball(ns, -1)
+      print("Score:", s1(rb), "-", s2(rb))
+      rb
+    } else { state }
   }
 }
 
@@ -180,13 +198,21 @@ fn draw_state(sdl, ren, state) {
   // scores (reuse simple print rectangles as digits placeholder)
   // Minimalistic: just draw small blocks per point (<= 10) for demonstration
   let i = 0
-  while i < s1(state) { sdl.fill_rect(ren, 360 - i*8, 10, 6, 12, 200,200,200,255); i = i + 1 }
+  while i < s1(state) {
+    sdl.fill_rect(ren, 360 - i*8, 10, 6, 12, 200,200,200,255)
+    i = i + 1
+  }
   let j = 0
-  while j < s2(state) { sdl.fill_rect(ren, 440 + j*8, 10, 6, 12, 200,200,200,255); j = j + 1 }
+  while j < s2(state) {
+    sdl.fill_rect(ren, 440 + j*8, 10, 6, 12, 200,200,200,255)
+    j = j + 1
+  }
   sdl.present(ren)
 }
 
 // ---------- Main Loop (effect orchestration) ----------
+// Outcome handling removed; scoring prints inline.
+
 fn main() {
   let sdl = import("sdl")
   sdl.init()
@@ -209,21 +235,7 @@ fn main() {
 
     // Advance one frame purely
     let moved_state = apply_inputs(state, p1dir, p2dir)
-    let outcome = simulate(moved_state)
-
-    match outcome {
-      Continue(ns) -> {
-        state = ns
-      }
-      Scored(side, ns) -> {
-        state = ns
-        print("Score:", s1(state), "-", s2(state))
-      }
-      Quit(ns) -> {
-        state = with_running(ns, false)
-        running = false
-      }
-    }
+  state = simulate(moved_state)
 
     draw_state(sdl, ren, state)
     sdl.delay(16)
