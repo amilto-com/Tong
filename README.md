@@ -229,6 +229,36 @@ distributed fn process_big_data(data) {
 }
 ```
 
+### Functional / Phase 1 Additions (Experimental)
+
+Early functional features inspired by Haskell (syntax may evolve):
+
+| Feature | Example | Notes |
+|---------|---------|-------|
+| Algebraic data types | `data Maybe = Nothing | Just x` | Registers constructors globally |
+| Pattern matching | `match m { Just x -> x, Nothing -> 0 }` | Arm guards: `Just x if x > 0 -> x` |
+| Wildcard | `_` | Matches anything, no binding |
+| Constructor subpatterns | `Just x` | Positional only |
+| List comprehension | `[ x*x | x in xs if x % 2 == 0 ]` | Single generator + optional filter |
+| Lambdas (pipe) | `|x| x + 1` | Single param shorthand |
+| Lambdas (backslash) | `\x y -> x + y` | Multi-arg, supports partials |
+| Partial application | `let add2 = add(2)` | Works for functions, lambdas, ctors |
+| Tuple destructuring | `let (a,b) = pair` | Source must be array-like of same length |
+| Tuple patterns in match | `match t { (x,_,z) -> ... }` | Matches fixed-size arrays |
+| Guarded multi-clause functions | `fn fact(n) if n==0 {1} fn fact(n) if n>0 { n*fact(n-1) }` | Clauses tried in order, first true guard runs |
+
+See `examples/features/` for runnable demonstrations.
+
+Current limitations:
+- No static type checking; all dynamic.
+- No exhaustive pattern analysis (runtime error if no arm matches).
+- Only one generator in list comprehensions.
+- Tuple/array patterns in `match` not yet implemented (constructors + literals + idents + `_`).
+ - Tuple patterns implemented for fixed-size arrays (no nested list comprehension binding yet).
+- Errors are minimal; diagnostics will improve.
+
+Planned next: richer patterns (nested tuples/constructors), multiple generators in list comprehensions, type annotations / inference groundwork, improved partial introspection, exhaustiveness & redundancy warnings.
+
 ## REPL
 Run without a file to enter the interactive REPL:
 
