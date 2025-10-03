@@ -110,13 +110,14 @@ pub enum BinOp {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program> {
-    let mut p = Parser { tokens, pos: 0 };
+    let mut p = Parser { tokens, pos: 0, known_ctors: std::collections::HashMap::new() };
     p.parse_program()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    known_ctors: std::collections::HashMap<String, usize>, // constructor name -> arity
 }
 
 impl Parser {
@@ -211,14 +212,21 @@ impl Parser {
             if *e - *s == 1 {
                 if let Some(tok) = self.tokens.get(*s) {
                     if tok.kind == TokenKind::Ident && tok.text != "_" {
-                        // Heuristic: Leading uppercase => constructor pattern (zero arity)
-                        // Treat as pattern so that clauses like def f(Nothing) become pattern clauses
-                        let is_ctor_like = tok
-                            .text
-                            .chars()
-                            .next()
-                            .map(|c| c.is_uppercase())
-                            .unwrap_or(false);
+                        // Prefer semantic detection: is token a known zero-arity constructor? Fallback heuristic.
+                        let text = &tok.text;
+                        let semantic_ctor = self
+                            .known_ctors
+                            .get(text)
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                            == 0;
+                        let heuristic_ctor = text.len() > 1
+                            && text
+                                .chars()
+                                .next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false);
+                        let is_ctor_like = semantic_ctor || heuristic_ctor;
                         if is_ctor_like {
                             all_simple = false; // force pattern function path
                             patterns.push(Pattern::Constructor {
@@ -241,6 +249,7 @@ impl Parser {
             let mut sub = Parser {
                 tokens: slice,
                 pos: 0,
+                known_ctors: self.known_ctors.clone(),
             };
             let pat = sub.parse_pattern()?; // reuse pattern parser
             patterns.push(pat);
@@ -289,6 +298,7 @@ impl Parser {
                     arity += 1;
                     self.bump();
                 }
+                self.known_ctors.insert(cname.clone(), arity);
                 ctors.push(Constructor { name: cname, arity });
                 if self.peek_is(TokenKind::Pipe) {
                     self.bump();
@@ -686,16 +696,20 @@ impl Parser {
             let mut node = Expr::Ident(self.bump().unwrap().text);
             // function call on identifier
             if self.peek_is(TokenKind::LParen) {
-                // Distinguish constructor vs function by initial uppercase letter of ident
+                // Distinguish constructor vs function using semantic table (preferred) then capitalization
                 let name = match &node {
                     Expr::Ident(n) => n.clone(),
                     _ => String::new(),
                 };
-                let is_ctor_like = name
-                    .chars()
-                    .next()
-                    .map(|c| c.is_uppercase())
-                    .unwrap_or(false);
+                let is_ctor_like = if let Some(_a) = self.known_ctors.get(&name) {
+                    true
+                } else {
+                    name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                };
                 self.eat(TokenKind::LParen)?;
                 let mut args = Vec::new();
                 if !self.peek_is(TokenKind::RParen) {
