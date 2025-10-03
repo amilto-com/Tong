@@ -235,30 +235,56 @@ Early functional features inspired by Haskell (syntax may evolve):
 
 | Feature | Example | Notes |
 |---------|---------|-------|
-| Algebraic data types | `data Maybe = Nothing | Just x` | Registers constructors globally |
-| Pattern matching | `match m { Just x -> x, Nothing -> 0 }` | Arm guards: `Just x if x > 0 -> x` |
+| Algebraic data types | `data Maybe = Nothing | Just x` | Registers constructors & arities globally |
+| Pattern matching | `match m { Just(x) -> x, Nothing -> 0 }` | Arm guards: `Just(x) if x > 0 -> x` |
 | Wildcard | `_` | Matches anything, no binding |
-| Constructor subpatterns | `Just x` | Positional only |
-| List comprehension | `[ x*x | x in xs if x%2==0 ]`, `[ (x,y) | x in xs, y in ys if cond ]` | Multiple generators + optional filter |
+| Constructor subpatterns | `Just(x)`, `Node(l,r)` | Positional only, parenthesized form preferred |
+| Nested constructor patterns | `match t { Node(Leaf(a), Leaf(b)) -> ... }` | Arbitrary nesting supported (dynamic) |
+| List comprehension | `[ x*x | x in xs if x%2==0 ]` / `[ (x,y) | x in xs, y in ys if cond ]` | Multiple generators + optional predicate |
 | Lambdas (pipe) | `|x| x + 1` | Single param shorthand |
 | Lambdas (backslash) | `\x y -> x + y` | Multi-arg, supports partials |
-| Partial application | `let add2 = add(2)` | Works for functions, lambdas, ctors |
-| Tuple destructuring | `let (a,b) = pair` | Source must be array-like of same length |
-| Tuple patterns in match | `match t { (x,_,z) -> ... }` | Matches fixed-size arrays |
-| Guarded multi-clause functions | `fn fact(n) if n==0 {1} fn fact(n) if n>0 { n*fact(n-1) }` | Clauses tried in order, first true guard runs |
+| Partial application | `let add2 = add(2)` | Functions & lambdas; supports currying
+| Partial constructor application | `let left = Node(Leaf(1))` then `left(Leaf(2))` | Produces `<partial:Name:n>` until saturated |
+| Tuple destructuring | `let (a,b) = pair` | Source must be array-like same length |
+| Tuple patterns in match | `match t { (x,_,z) -> ... }` | Fixed-size array (tuple) patterns |
+| Guarded multi-clause functions | `fn fact(n) if n==0 {1}` / `fn fact(n) if n>0 { n*fact(n-1) }` | First passing guard executes |
 
 See `examples/features/` for runnable demonstrations.
 
 Current limitations:
-- No static type checking; all dynamic.
-- No exhaustive pattern analysis (runtime error if no arm matches).
-// Updated limitation removed: multi-generator supported.
-- Multiple generators now supported in list comprehensions.
-- Tuple/array patterns in `match` not yet implemented (constructors + literals + idents + `_`).
- - Tuple patterns implemented for fixed-size arrays (no nested list comprehension binding yet).
-- Errors are minimal; diagnostics will improve.
+* Dynamic only (no static type checking yet).
+* No exhaustive / redundancy analysis for `match` (missing case triggers runtime error).
+* Pattern guards for function clauses are limited to a single guard expression (no clause pattern syntax yet like `fn f(Just(x)) { ... }`).
+* Tuple patterns treat arrays as tuples; no variadic / rest patterns.
+* Error diagnostics are still minimal (work in progress).
 
-Planned next: richer patterns (nested tuples/constructors), multiple generators in list comprehensions, type annotations / inference groundwork, improved partial introspection, exhaustiveness & redundancy warnings.
+Recent improvements:
+* Multi-generator list comprehensions.
+* Parenthesized constructor calls & patterns (`Just(42)`, `Node(left,right)`).
+* Partial application generalized to constructors.
+* Nested constructor patterns (example: `nested_patterns.tong`).
+* Implicit last-expression return in function bodies (you can omit `return` for final expression).
+
+Planned next:
+* Clause pattern syntax for functions (`fn sum(Node(l,r)) { ... }`).
+* Exhaustiveness & redundancy warnings.
+* Type annotations & inference groundwork.
+* Improved partial introspection / debug printing.
+* Better error spans / diagnostics.
+
+### Constructor Partial Application
+
+Constructors behave like functions: applying fewer arguments than the declared arity produces a partial that can be saturated later.
+
+Example (`examples/features/constructor_partial.tong`):
+```tong
+data Tree = Leaf v | Node left right
+
+let left_only = Node(Leaf(1))      // <partial:Node:1>
+let full = left_only(Leaf(2))      // Node(Leaf(1),Leaf(2))
+print(full)
+```
+This mirrors partial application for functions and lambdas and enables ergonomic construction of deeply nested values.
 
 ## REPL
 Run without a file to enter the interactive REPL:

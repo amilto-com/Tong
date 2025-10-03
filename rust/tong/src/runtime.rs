@@ -43,7 +43,7 @@ pub fn execute(program: Program) -> Result<()> {
         Stmt::LetTuple(names, expr) => { let v = env.eval_expr(expr.clone())?; match v { Value::Array(items) => { if items.len() != names.len() { bail!("tuple arity mismatch"); } for (n,it) in names.iter().zip(items.into_iter()) { env.vars_mut().insert(n.clone(), it); } }, _ => bail!("destructuring expects array value"), } }
         Stmt::Print(args) => { let parts: Result<Vec<String>> = args.iter().cloned().map(|e| env.eval_expr(e).map(|v| format_value(&v))).collect(); println!("{}", parts?.join(" ")); }
         Stmt::Expr(e) => { let _ = env.eval_expr(e.clone())?; }
-        Stmt::DataDecl(_, ctors) => { for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); } }
+        Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); } env.type_ctors.insert(type_name.clone(), names); }
         Stmt::FnDefGuarded(_,_,_,_) => { /* already collected */ }
         _ => {} } }
 
@@ -79,7 +79,8 @@ struct Env {
     modules: HashMap<String, Value>,
     #[cfg(not(feature = "sdl3"))] sdl_frame: i64,
     #[cfg(feature = "sdl3")] sdl: Option<SdlState>,
-    data_ctors: HashMap<String, usize>,
+    data_ctors: HashMap<String, usize>, // ctor name -> arity
+    type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
 }
 
 impl Env {
@@ -152,7 +153,7 @@ impl Env {
                     _ => bail!("destructuring expects array value"),
                 }
             }
-            Stmt::DataDecl(_, ctors) => { for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); } Ok(None) }
+            Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); } self.type_ctors.insert(type_name.clone(), names); Ok(None) }
             Stmt::Expr(e) => {
                 let _ = self.eval_expr(e.clone())?;
                 Ok(None)
@@ -201,6 +202,7 @@ impl Env {
             #[cfg(feature = "sdl3")]
             sdl: None,
             data_ctors: HashMap::new(),
+            type_ctors: HashMap::new(),
         }
     }
     fn vars(&self) -> &HashMap<String, Value> {
@@ -546,21 +548,18 @@ impl Env {
                 Value::Array(out)
             }
             Expr::Match { scrutinee, arms } => {
-                let val = self.eval_expr(*scrutinee)?;
-                for (pat, guard, body) in arms {
-                    // new scope for pattern bindings
+                let val = self.eval_expr(*scrutinee.clone())?;
+                for (pat, guard, body) in arms.clone() {
                     self.vars_stack.push(HashMap::new());
                     let matched = self.match_pattern(&pat, &val)?;
-                    let guard_pass = if matched {
-                        if let Some(g) = guard.clone() { matches!(self.eval_expr(g)?, Value::Bool(true)) } else { true }
-                    } else { false };
-                    if matched && guard_pass {
-                        let res = self.eval_expr(body)?;
-                        self.vars_stack.pop();
-                        return Ok(res);
-                    }
+                    let guard_pass = if matched { if let Some(g) = guard.clone() { matches!(self.eval_expr(g)?, Value::Bool(true)) } else { true } } else { false };
+                    if matched && guard_pass { let res = self.eval_expr(body)?; self.vars_stack.pop();
+                        // crude exhaustiveness check: if no wildcard and scrutinee is a constructor with a known type, warn if uncovered ctors remain
+                        self.check_match_exhaustiveness(&*scrutinee, &arms)?; return Ok(res); }
                     self.vars_stack.pop();
                 }
+                // no arm matched
+                eprintln!("[TONG][warn] non-exhaustive match at runtime");
                 bail!("non-exhaustive match")
             }
             Expr::Binary { op, left, right } => {
@@ -786,6 +785,31 @@ impl Env {
             self.vars_stack.pop();
         }
         bail!("no guard matched for {name}")
+    }
+
+    // Very shallow exhaustiveness check: if scrutinee is a constructor value (or Ident referencing a constructor) and match arms enumerate some constructors without wildcard,
+    // warn about missing constructors of the same type. Since types are not tracked, we approximate by collecting constructor names used in patterns and comparing against
+    // all constructors known globally whose arity matches the arities seen. This is heuristic but useful for early feedback.
+    fn check_match_exhaustiveness(&self, _scrutinee_expr: &Expr, arms: &[(Pattern, Option<Expr>, Expr)]) -> Result<()> {
+        // If any wildcard present, treat as exhaustive
+        if arms.iter().any(|(p,_,_)| matches!(p, Pattern::Wildcard)) { return Ok(()); }
+        // Collect constructor names used in top-level patterns
+        let mut used: Vec<String> = Vec::new();
+        for (p,_,_) in arms { if let Pattern::Constructor { name, .. } = p { if !used.contains(name) { used.push(name.clone()); } } }
+        if used.is_empty() { return Ok(()); }
+        // Gather all known constructors; if all known ctors for some type are covered, fine; if not, warn.
+        // We don't have reverse mapping from ctor->type, so approximate: for each type, if any of its ctors appear in used, consider it the candidate set.
+        for (ty, ctors) in &self.type_ctors {
+            if ctors.iter().any(|c| used.contains(c)) {
+                let missing: Vec<&String> = ctors.iter().filter(|c| !used.contains(c)).collect();
+                if !missing.is_empty() {
+                    let mut first = true; let mut list = String::new();
+                    for m in missing { if !first { list.push(','); } list.push_str(m); first=false; }
+                    eprintln!("[TONG][warn] non-exhaustive match for type '{ty}'; missing constructors: {list}");
+                }
+            }
+        }
+        Ok(())
     }
 }
 
