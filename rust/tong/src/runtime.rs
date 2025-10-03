@@ -1,6 +1,4 @@
-#[cfg(feature = "sdl3")]
-use anyhow::anyhow; // anyhow! macro for SDL code paths
-use anyhow::{bail, Result, anyhow};
+use anyhow::{anyhow, bail, Result}; // anyhow! macro and helpers
 use std::collections::HashMap;
 #[cfg(feature = "sdl3")]
 use std::time::Duration; // Duration used in sdl_delay
@@ -28,11 +26,18 @@ pub fn builtin_functions() -> Vec<&'static str> {
 pub fn execute(program: Program, debug: bool) -> Result<()> {
     let mut env = Env::new();
     env.debug = debug;
-    if env.debug { eprintln!("[TONG][dbg] start: {} top-level statements", program.stmts.len()); }
+    if env.debug {
+        eprintln!(
+            "[TONG][dbg] start: {} top-level statements",
+            program.stmts.len()
+        );
+    }
 
     // First collect function definitions
     for (i, stmt) in program.stmts.iter().enumerate() {
-        if env.debug { eprintln!("[TONG][dbg] top-level stmt #{}: {}", i, stmt.kind_name()); }
+        if env.debug {
+            eprintln!("[TONG][dbg] top-level stmt #{}: {}", i, stmt.kind_name());
+        }
         match stmt {
             Stmt::FnDef(name, params, body) => {
                 env.funcs
@@ -146,14 +151,20 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 env.vars_mut().insert(name.clone(), v);
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
-                let base = env.get_var(name).ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
+                let base = env
+                    .get_var(name)
+                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
                 let idx_v = env.eval_expr(idx_expr.clone())?;
                 let new_v = env.eval_expr(val_expr.clone())?;
                 match (base, idx_v) {
                     (Value::Array(mut items), Value::Int(i)) => {
-                        if i < 0 { bail!("negative index") }
+                        if i < 0 {
+                            bail!("negative index")
+                        }
                         let ui = i as usize;
-                        if ui >= items.len() { bail!("index out of bounds") }
+                        if ui >= items.len() {
+                            bail!("index out of bounds")
+                        }
                         items[ui] = new_v;
                         env.vars_mut().insert(name.clone(), Value::Array(items));
                     }
@@ -264,7 +275,9 @@ impl Env {
 
     // Execute a single statement. Return Some(value) if a Return was hit.
     fn exec_stmt(&mut self, s: &Stmt) -> Result<Option<Value>> {
-        if self.debug { eprintln!("[TONG][dbg] exec {:?}", s.kind_name()); }
+        if self.debug {
+            eprintln!("[TONG][dbg] exec {:?}", s.kind_name());
+        }
         match s {
             Stmt::Import(n, m) => {
                 let v = self.import_module(m)?;
@@ -282,14 +295,20 @@ impl Env {
                 Ok(None)
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
-                let base = self.get_var(name).ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
+                let base = self
+                    .get_var(name)
+                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
                 let idx_v = self.eval_expr(idx_expr.clone())?;
                 let new_v = self.eval_expr(val_expr.clone())?;
                 match (base, idx_v) {
                     (Value::Array(mut items), Value::Int(i)) => {
-                        if i < 0 { bail!("negative index") }
+                        if i < 0 {
+                            bail!("negative index")
+                        }
                         let ui = i as usize;
-                        if ui >= items.len() { bail!("index out of bounds") }
+                        if ui >= items.len() {
+                            bail!("index out of bounds")
+                        }
                         items[ui] = new_v;
                         self.vars_mut().insert(name.clone(), Value::Array(items));
                         Ok(None)
@@ -373,10 +392,14 @@ impl Env {
             Stmt::While(cond, body) => {
                 loop {
                     let v = self.eval_expr(cond.clone())?;
-                    if !matches!(v, Value::Bool(true)) { break; }
+                    if !matches!(v, Value::Bool(true)) {
+                        break;
+                    }
                     // Execute statements but ignore implicit last expression value to prevent accidental loop termination
                     for s in body {
-                        if let Some(rv) = self.exec_stmt(s)? { return Ok(Some(rv)); }
+                        if let Some(rv) = self.exec_stmt(s)? {
+                            return Ok(Some(rv));
+                        }
                     }
                 }
                 Ok(None)
@@ -881,7 +904,10 @@ impl Env {
                 let mut last: Option<Value> = None;
                 for s in stmts {
                     match self.exec_stmt(&s)? {
-                        Some(rv) => { last = Some(rv); break; }
+                        Some(rv) => {
+                            last = Some(rv);
+                            break;
+                        }
                         None => {
                             if let Stmt::Expr(e) = s.clone() {
                                 // capture expression value
@@ -954,59 +980,61 @@ impl Env {
                     let l = self.eval_expr(*left)?;
                     let r = self.eval_expr(*right)?;
                     match (l, r, op) {
-                    // Logical AND: both operands must be Bool; left short-circuit implemented earlier by evaluating sequentially (we already evaluated r, so mimic semantics w/o side effects distinction). For true short-circuit we need special case before evaluating r; adjust above.
-                    (Value::Bool(a), Value::Bool(b), BinOp::And) => Value::Bool(a && b),
-                    (Value::Int(a), Value::Int(b), BinOp::Add) => Value::Int(a + b),
-                    (Value::Int(a), Value::Int(b), BinOp::Sub) => Value::Int(a - b),
-                    (Value::Int(a), Value::Int(b), BinOp::Mul) => Value::Int(a * b),
-                    (Value::Int(a), Value::Int(b), BinOp::Div) => Value::Float(a as f64 / b as f64),
-                    (Value::Int(a), Value::Int(b), BinOp::Mod) => Value::Int(a % b),
+                        // Logical AND: both operands must be Bool; left short-circuit implemented earlier by evaluating sequentially (we already evaluated r, so mimic semantics w/o side effects distinction). For true short-circuit we need special case before evaluating r; adjust above.
+                        (Value::Bool(a), Value::Bool(b), BinOp::And) => Value::Bool(a && b),
+                        (Value::Int(a), Value::Int(b), BinOp::Add) => Value::Int(a + b),
+                        (Value::Int(a), Value::Int(b), BinOp::Sub) => Value::Int(a - b),
+                        (Value::Int(a), Value::Int(b), BinOp::Mul) => Value::Int(a * b),
+                        (Value::Int(a), Value::Int(b), BinOp::Div) => {
+                            Value::Float(a as f64 / b as f64)
+                        }
+                        (Value::Int(a), Value::Int(b), BinOp::Mod) => Value::Int(a % b),
 
-                    (Value::Float(a), Value::Float(b), BinOp::Add) => Value::Float(a + b),
-                    (Value::Float(a), Value::Float(b), BinOp::Sub) => Value::Float(a - b),
-                    (Value::Float(a), Value::Float(b), BinOp::Mul) => Value::Float(a * b),
-                    (Value::Float(a), Value::Float(b), BinOp::Div) => Value::Float(a / b),
+                        (Value::Float(a), Value::Float(b), BinOp::Add) => Value::Float(a + b),
+                        (Value::Float(a), Value::Float(b), BinOp::Sub) => Value::Float(a - b),
+                        (Value::Float(a), Value::Float(b), BinOp::Mul) => Value::Float(a * b),
+                        (Value::Float(a), Value::Float(b), BinOp::Div) => Value::Float(a / b),
 
-                    // int/float mixed
-                    (Value::Int(a), Value::Float(b), BinOp::Add) => Value::Float(a as f64 + b),
-                    (Value::Int(a), Value::Float(b), BinOp::Sub) => Value::Float(a as f64 - b),
-                    (Value::Int(a), Value::Float(b), BinOp::Mul) => Value::Float(a as f64 * b),
-                    (Value::Int(a), Value::Float(b), BinOp::Div) => Value::Float(a as f64 / b),
-                    (Value::Float(a), Value::Int(b), BinOp::Add) => Value::Float(a + b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Sub) => Value::Float(a - b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Mul) => Value::Float(a * b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Div) => Value::Float(a / b as f64),
+                        // int/float mixed
+                        (Value::Int(a), Value::Float(b), BinOp::Add) => Value::Float(a as f64 + b),
+                        (Value::Int(a), Value::Float(b), BinOp::Sub) => Value::Float(a as f64 - b),
+                        (Value::Int(a), Value::Float(b), BinOp::Mul) => Value::Float(a as f64 * b),
+                        (Value::Int(a), Value::Float(b), BinOp::Div) => Value::Float(a as f64 / b),
+                        (Value::Float(a), Value::Int(b), BinOp::Add) => Value::Float(a + b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Sub) => Value::Float(a - b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Mul) => Value::Float(a * b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Div) => Value::Float(a / b as f64),
 
-                    (Value::Float(a), Value::Float(b), BinOp::Eq) => {
-                        Value::Bool((a - b).abs() < f64::EPSILON)
-                    }
-                    (Value::Int(a), Value::Int(b), BinOp::Eq) => Value::Bool(a == b),
-                    (Value::Bool(a), Value::Bool(b), BinOp::Eq) => Value::Bool(a == b),
-                    (Value::Str(a), Value::Str(b), BinOp::Eq) => Value::Bool(a == b),
+                        (Value::Float(a), Value::Float(b), BinOp::Eq) => {
+                            Value::Bool((a - b).abs() < f64::EPSILON)
+                        }
+                        (Value::Int(a), Value::Int(b), BinOp::Eq) => Value::Bool(a == b),
+                        (Value::Bool(a), Value::Bool(b), BinOp::Eq) => Value::Bool(a == b),
+                        (Value::Str(a), Value::Str(b), BinOp::Eq) => Value::Bool(a == b),
 
-                    (Value::Float(a), Value::Float(b), BinOp::Ne) => {
-                        Value::Bool((a - b).abs() >= f64::EPSILON)
-                    }
-                    (Value::Int(a), Value::Int(b), BinOp::Ne) => Value::Bool(a != b),
-                    (Value::Bool(a), Value::Bool(b), BinOp::Ne) => Value::Bool(a != b),
-                    (Value::Str(a), Value::Str(b), BinOp::Ne) => Value::Bool(a != b),
+                        (Value::Float(a), Value::Float(b), BinOp::Ne) => {
+                            Value::Bool((a - b).abs() >= f64::EPSILON)
+                        }
+                        (Value::Int(a), Value::Int(b), BinOp::Ne) => Value::Bool(a != b),
+                        (Value::Bool(a), Value::Bool(b), BinOp::Ne) => Value::Bool(a != b),
+                        (Value::Str(a), Value::Str(b), BinOp::Ne) => Value::Bool(a != b),
 
-                    (Value::Int(a), Value::Int(b), BinOp::Lt) => Value::Bool(a < b),
-                    (Value::Int(a), Value::Int(b), BinOp::Le) => Value::Bool(a <= b),
-                    (Value::Int(a), Value::Int(b), BinOp::Gt) => Value::Bool(a > b),
-                    (Value::Int(a), Value::Int(b), BinOp::Ge) => Value::Bool(a >= b),
-                    (Value::Float(a), Value::Float(b), BinOp::Lt) => Value::Bool(a < b),
-                    (Value::Float(a), Value::Float(b), BinOp::Le) => Value::Bool(a <= b),
-                    (Value::Float(a), Value::Float(b), BinOp::Gt) => Value::Bool(a > b),
-                    (Value::Float(a), Value::Float(b), BinOp::Ge) => Value::Bool(a >= b),
-                    (Value::Float(a), Value::Int(b), BinOp::Lt) => Value::Bool(a < b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Le) => Value::Bool(a <= b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Gt) => Value::Bool(a > b as f64),
-                    (Value::Float(a), Value::Int(b), BinOp::Ge) => Value::Bool(a >= b as f64),
-                    (Value::Int(a), Value::Float(b), BinOp::Lt) => Value::Bool((a as f64) < b),
-                    (Value::Int(a), Value::Float(b), BinOp::Le) => Value::Bool((a as f64) <= b),
-                    (Value::Int(a), Value::Float(b), BinOp::Gt) => Value::Bool((a as f64) > b),
-                    (Value::Int(a), Value::Float(b), BinOp::Ge) => Value::Bool((a as f64) >= b),
+                        (Value::Int(a), Value::Int(b), BinOp::Lt) => Value::Bool(a < b),
+                        (Value::Int(a), Value::Int(b), BinOp::Le) => Value::Bool(a <= b),
+                        (Value::Int(a), Value::Int(b), BinOp::Gt) => Value::Bool(a > b),
+                        (Value::Int(a), Value::Int(b), BinOp::Ge) => Value::Bool(a >= b),
+                        (Value::Float(a), Value::Float(b), BinOp::Lt) => Value::Bool(a < b),
+                        (Value::Float(a), Value::Float(b), BinOp::Le) => Value::Bool(a <= b),
+                        (Value::Float(a), Value::Float(b), BinOp::Gt) => Value::Bool(a > b),
+                        (Value::Float(a), Value::Float(b), BinOp::Ge) => Value::Bool(a >= b),
+                        (Value::Float(a), Value::Int(b), BinOp::Lt) => Value::Bool(a < b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Le) => Value::Bool(a <= b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Gt) => Value::Bool(a > b as f64),
+                        (Value::Float(a), Value::Int(b), BinOp::Ge) => Value::Bool(a >= b as f64),
+                        (Value::Int(a), Value::Float(b), BinOp::Lt) => Value::Bool((a as f64) < b),
+                        (Value::Int(a), Value::Float(b), BinOp::Le) => Value::Bool((a as f64) <= b),
+                        (Value::Int(a), Value::Float(b), BinOp::Gt) => Value::Bool((a as f64) > b),
+                        (Value::Int(a), Value::Float(b), BinOp::Ge) => Value::Bool((a as f64) >= b),
 
                         (l, r, _) => bail!("unsupported operands for operation: {:?}", (l, r)),
                     }
@@ -1262,8 +1290,8 @@ impl Env {
             .pattern_funcs
             .get(&name)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!(format!("unknown pattern function {name}")))?;
-        for (patterns, guard, body) in clauses {
+            .ok_or_else(|| anyhow!(format!("unknown pattern function {name}")))?;
+        for (patterns, guard, body) in clauses.into_iter() {
             if patterns.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
@@ -1297,8 +1325,8 @@ impl Env {
             .guarded_funcs
             .get(&name)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!(format!("unknown guarded function {name}")))?;
-        for (params, guard_expr, body) in clauses {
+            .ok_or_else(|| anyhow!(format!("unknown guarded function {name}")))?;
+        for (params, guard_expr, body) in clauses.into_iter() {
             if params.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }

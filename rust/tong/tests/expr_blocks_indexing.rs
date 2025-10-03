@@ -6,7 +6,7 @@ use std::str;
 #[test]
 fn block_expression_and_indexing() {
     // We'll craft a small program that exercises nested indexing and a block expression.
-        let program = r#"
+    let program = r#"
 fn main() {
     let grid = [[1,2],[3,4]]
     print(grid[1][0])
@@ -31,7 +31,11 @@ main()
         .output()
         .expect("run program");
 
-    assert!(output.status.success(), "program failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "program failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Expect two lines: 3 (grid[1][0]) and 17 (block: a=5, b=15, b+2=17)
     let lines: Vec<&str> = stdout.lines().collect();

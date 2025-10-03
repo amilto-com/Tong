@@ -1,4 +1,1 @@
-AND1 false count 0
-AND2 true count 1
-OR1 true count 1
-OR2 true count 2
+AND1 false count 0 AND2 true count 1 OR1 true count 1 OR2 true count 2
