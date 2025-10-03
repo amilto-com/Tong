@@ -32,7 +32,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
 
     // First collect function definitions
     for (i, stmt) in program.stmts.iter().enumerate() {
-        if env.debug { eprintln!("[TONG][dbg] top-level stmt #{}", i); }
+        if env.debug { eprintln!("[TONG][dbg] top-level stmt #{}: {}", i, stmt.kind_name()); }
         match stmt {
             Stmt::FnDef(name, params, body) => {
                 env.funcs
@@ -249,6 +249,7 @@ impl Env {
 
     // Execute a single statement. Return Some(value) if a Return was hit.
     fn exec_stmt(&mut self, s: &Stmt) -> Result<Option<Value>> {
+        if self.debug { eprintln!("[TONG][dbg] exec {:?}", s.kind_name()); }
         match s {
             Stmt::Import(n, m) => {
                 let v = self.import_module(m)?;
