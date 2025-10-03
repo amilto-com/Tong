@@ -40,9 +40,8 @@ pub enum Expr {
     },
     ListComp {
         elem: Box<Expr>,
-        var: String,
-        list: Box<Expr>,
-        pred: Option<Box<Expr>>, // optional predicate
+        generators: Vec<(String, Expr)>, // (var, list_expr) pairs, evaluated left-to-right
+        pred: Option<Box<Expr>>, // optional predicate applied after all bindings
     },
 }
 
@@ -522,13 +521,28 @@ impl Parser {
                 let first = self.parse_expr()?;
                 if self.peek_is(TokenKind::Pipe) {
                     self.bump();
-                    let var = self.eat_ident()?;
-                    if !self.peek_is(TokenKind::In) { bail!("expected 'in' in list comprehension"); }
-                    self.bump();
-                    let list_expr = self.parse_expr()?;
+                    // Parse one or more generators: x in xs, y in ys, ...
+                    let mut gens: Vec<(String, Expr)> = Vec::new();
+                    loop {
+                        let var = self.eat_ident()?;
+                        if !self.peek_is(TokenKind::In) { bail!("expected 'in' in list comprehension"); }
+                        self.bump();
+                        let list_expr = self.parse_expr()?;
+                        gens.push((var, list_expr));
+                        if self.peek_is(TokenKind::Comma) {
+                            // Lookahead: if next after comma starts an Ident then keep parsing more gens; otherwise break (will treat as array elements)
+                            self.bump();
+                            // If next token is Ident and followed by 'in', continue parsing another generator
+                            if self.peek_is(TokenKind::Ident) && self.peek_n_is(1, TokenKind::In) {
+                                continue;
+                            } else {
+                                bail!("unexpected comma in list comprehension generators; expected another '<ident> in <expr>'");
+                            }
+                        } else { break; }
+                    }
                     let pred = if self.peek_is(TokenKind::If) { self.bump(); Some(Box::new(self.parse_expr()?)) } else { None };
                     self.eat(TokenKind::RBracket)?;
-                    Ok(Expr::ListComp { elem: Box::new(first), var, list: Box::new(list_expr), pred })
+                    Ok(Expr::ListComp { elem: Box::new(first), generators: gens, pred })
                 } else {
                     let mut elems = vec![first];
                     while self.peek_is(TokenKind::Comma) { self.bump(); elems.push(self.parse_expr()?); }

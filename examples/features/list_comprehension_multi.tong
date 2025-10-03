@@ -1,0 +1,6 @@
+// Multi-generator list comprehension: all pairs (x,y) where x in nums, y in nums2 and x < y
+
+let nums = [1,2,3]
+let nums2 = [2,3,4]
+let pairs = [ x * 10 + y | x in nums, y in nums2 if x < y ]
+print(pairs)

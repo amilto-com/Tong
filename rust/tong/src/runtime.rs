@@ -495,20 +495,38 @@ impl Env {
                     }
                 }
             }
-            Expr::ListComp { elem, var, list, pred } => {
-                let list_val = self.eval_expr(*list)?;
-                match list_val {
-                    Value::Array(items) => {
-                        let mut out = Vec::new();
-                        for it in items {
-                            self.vars_mut().insert(var.clone(), it.clone());
-                            if let Some(p) = &pred { let pv = self.eval_expr(*p.clone())?; if !matches!(pv, Value::Bool(true)) { continue; } }
-                            let ev = self.eval_expr(*elem.clone())?; out.push(ev);
+            Expr::ListComp { elem, generators, pred } => {
+                // Recursive helper to bind generators left-to-right
+                fn eval_gens(env: &mut Env, gens: &[(String, Expr)], idx: usize, elem: &Expr, pred: &Option<Box<Expr>>, out: &mut Vec<Value>) -> Result<()> {
+                    if idx == gens.len() {
+                        // All generators bound; evaluate predicate then elem
+                        if let Some(p) = pred {
+                            let pv = env.eval_expr(*p.clone())?;
+                            if !matches!(pv, Value::Bool(true)) { return Ok(()); }
                         }
-                        Value::Array(out)
+                        let ev = env.eval_expr(elem.clone())?;
+                        out.push(ev);
+                        return Ok(());
                     }
-                    _ => bail!("list comprehension expects array source"),
+                    let (var, list_expr) = &gens[idx];
+                    let list_val = env.eval_expr(list_expr.clone())?;
+                    match list_val {
+                        Value::Array(items) => {
+                            for it in items {
+                                // push new scope for each binding to avoid leaking between iterations
+                                env.vars_stack.push(HashMap::new());
+                                env.vars_mut().insert(var.clone(), it);
+                                eval_gens(env, gens, idx + 1, elem, pred, out)?;
+                                env.vars_stack.pop();
+                            }
+                            Ok(())
+                        }
+                        _ => bail!("list comprehension expects array source for generator '{}'", var),
+                    }
                 }
+                let mut out = Vec::new();
+                eval_gens(self, &generators, 0, &elem, &pred, &mut out)?;
+                Value::Array(out)
             }
             Expr::Match { scrutinee, arms } => {
                 let val = self.eval_expr(*scrutinee)?;

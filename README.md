@@ -239,7 +239,7 @@ Early functional features inspired by Haskell (syntax may evolve):
 | Pattern matching | `match m { Just x -> x, Nothing -> 0 }` | Arm guards: `Just x if x > 0 -> x` |
 | Wildcard | `_` | Matches anything, no binding |
 | Constructor subpatterns | `Just x` | Positional only |
-| List comprehension | `[ x*x | x in xs if x % 2 == 0 ]` | Single generator + optional filter |
+| List comprehension | `[ x*x | x in xs if x%2==0 ]`, `[ (x,y) | x in xs, y in ys if cond ]` | Multiple generators + optional filter |
 | Lambdas (pipe) | `|x| x + 1` | Single param shorthand |
 | Lambdas (backslash) | `\x y -> x + y` | Multi-arg, supports partials |
 | Partial application | `let add2 = add(2)` | Works for functions, lambdas, ctors |
@@ -252,7 +252,8 @@ See `examples/features/` for runnable demonstrations.
 Current limitations:
 - No static type checking; all dynamic.
 - No exhaustive pattern analysis (runtime error if no arm matches).
-- Only one generator in list comprehensions.
+// Updated limitation removed: multi-generator supported.
+- Multiple generators now supported in list comprehensions.
 - Tuple/array patterns in `match` not yet implemented (constructors + literals + idents + `_`).
  - Tuple patterns implemented for fixed-size arrays (no nested list comprehension binding yet).
 - Errors are minimal; diagnostics will improve.
