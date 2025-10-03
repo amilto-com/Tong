@@ -1,0 +1,14 @@
+// Placeholder example for forthcoming in-place style array element update sugar.
+// Currently TONG does not support direct arr[i] = v syntax. This example shows the
+// manual pattern of rebinding for a single-element update.
+// Planned sugar: arr[i] = expr  ==>  let tmp = arr; let arr = update_index(tmp, i, expr)
+// or a dedicated runtime intrinsic returning a new array with the substituted element.
+
+fn main() {
+  let xs = [0,1,2]
+  xs[0] = xs[0] + 10
+  xs[2] = xs[1] + xs[2]
+  print("updated array", xs[0], xs[1], xs[2])
+}
+
+main()

@@ -1,0 +1,17 @@
+// Demonstrate unary logical negation '!'
+// Expected output:
+// NOT1 true
+// NOT2 false
+// Combined true
+
+fn main() {
+  let a = false
+  let b = !a
+  print("NOT1", b)
+  let c = !b
+  print("NOT2", c)
+  let d = !(a || b) & (!c || a == false)
+  print("Combined", d)
+}
+
+main()

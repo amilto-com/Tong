@@ -78,6 +78,8 @@ pub enum TokenKind {
     EqualEqual,
     #[token("!=")]
     BangEqual,
+    #[token("!")]
+    Bang,
     #[token("<=")]
     LessEqual,
     #[token(">=")]

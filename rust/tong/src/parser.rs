@@ -38,6 +38,7 @@ pub enum Expr {
     },
     Index(Box<Expr>, Box<Expr>),
     UnaryNeg(Box<Expr>),
+    UnaryNot(Box<Expr>),
     Match {
         scrutinee: Box<Expr>,
         arms: Vec<(Pattern, Option<Expr>, Expr)>, // pattern, optional guard, result
@@ -68,6 +69,7 @@ pub enum Stmt {
     Let(String, Expr),
     LetTuple(Vec<String>, Expr),
     Assign(String, Expr),
+    ArrayAssign(String, Expr, Expr), // name[index] = value
     Print(Vec<Expr>),
     FnMain(Vec<Stmt>),
     FnDef(String, Vec<String>, Vec<Stmt>),
@@ -89,6 +91,7 @@ impl Stmt {
             Stmt::Let(..) => "Let",
             Stmt::LetTuple(..) => "LetTuple",
             Stmt::Assign(..) => "Assign",
+            Stmt::ArrayAssign(..) => "ArrayAssign",
             Stmt::Print(..) => "Print",
             Stmt::FnMain(..) => "FnMain",
             Stmt::FnDef(..) => "FnDef",
@@ -436,6 +439,27 @@ impl Parser {
             self.eat(TokenKind::Equal)?;
             let value = self.parse_expr()?;
             Ok(Stmt::Assign(name, value))
+        } else if self.peek_is(TokenKind::Ident) && self.peek_n_is(1, TokenKind::LBracket) {
+            // look for pattern: ident '[' expr ']' '=' expr
+            // Need to trial parse without consuming irrecoverably if it fails.
+            let save = self.pos;
+            let name_tok = self.bump().unwrap(); // ident
+            if self.peek_is(TokenKind::LBracket) {
+                self.bump();
+                let idx_expr = self.parse_expr()?;
+                if self.peek_is(TokenKind::RBracket) {
+                    self.bump();
+                    if self.peek_is(TokenKind::Equal) {
+                        self.bump();
+                        let val_expr = self.parse_expr()?;
+                        return Ok(Stmt::ArrayAssign(name_tok.text, idx_expr, val_expr));
+                    }
+                }
+            }
+            // fallback: reset and treat as expression statement
+            self.pos = save;
+            let e = self.parse_expr()?;
+            Ok(Stmt::Expr(e))
         } else {
             // expression statement (covers calls, method calls, property chains, etc.)
             let e = self.parse_expr()?;
@@ -601,6 +625,11 @@ impl Parser {
             self.bump();
             let e = self.parse_unary()?;
             return Ok(Expr::UnaryNeg(Box::new(e)));
+        }
+        if self.peek_is(TokenKind::Bang) {
+            self.bump();
+            let e = self.parse_unary()?;
+            return Ok(Expr::UnaryNot(Box::new(e)));
         }
         if self.peek_is(TokenKind::Plus) {
             self.bump();

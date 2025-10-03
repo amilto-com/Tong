@@ -1,6 +1,6 @@
 #[cfg(feature = "sdl3")]
 use anyhow::anyhow; // anyhow! macro for SDL code paths
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, anyhow};
 use std::collections::HashMap;
 #[cfg(feature = "sdl3")]
 use std::time::Duration; // Duration used in sdl_delay
@@ -145,6 +145,21 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 let v = env.eval_expr(expr.clone())?;
                 env.vars_mut().insert(name.clone(), v);
             }
+            Stmt::ArrayAssign(name, idx_expr, val_expr) => {
+                let base = env.get_var(name).ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
+                let idx_v = env.eval_expr(idx_expr.clone())?;
+                let new_v = env.eval_expr(val_expr.clone())?;
+                match (base, idx_v) {
+                    (Value::Array(mut items), Value::Int(i)) => {
+                        if i < 0 { bail!("negative index") }
+                        let ui = i as usize;
+                        if ui >= items.len() { bail!("index out of bounds") }
+                        items[ui] = new_v;
+                        env.vars_mut().insert(name.clone(), Value::Array(items));
+                    }
+                    _ => bail!("array element assignment expects array variable and int index"),
+                }
+            }
             Stmt::LetTuple(names, expr) => {
                 let v = env.eval_expr(expr.clone())?;
                 match v {
@@ -265,6 +280,22 @@ impl Env {
                 let v = self.eval_expr(e.clone())?;
                 self.vars_mut().insert(n.clone(), v);
                 Ok(None)
+            }
+            Stmt::ArrayAssign(name, idx_expr, val_expr) => {
+                let base = self.get_var(name).ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
+                let idx_v = self.eval_expr(idx_expr.clone())?;
+                let new_v = self.eval_expr(val_expr.clone())?;
+                match (base, idx_v) {
+                    (Value::Array(mut items), Value::Int(i)) => {
+                        if i < 0 { bail!("negative index") }
+                        let ui = i as usize;
+                        if ui >= items.len() { bail!("index out of bounds") }
+                        items[ui] = new_v;
+                        self.vars_mut().insert(name.clone(), Value::Array(items));
+                        Ok(None)
+                    }
+                    _ => bail!("array element assignment expects array variable and int index"),
+                }
             }
             Stmt::Print(args) => {
                 let mut parts = Vec::new();
@@ -456,6 +487,10 @@ impl Env {
                 Value::Int(i) => Value::Int(-i),
                 Value::Float(f) => Value::Float(-f),
                 _ => bail!("unary '-' expects numeric"),
+            },
+            Expr::UnaryNot(inner) => match self.eval_expr(*inner)? {
+                Value::Bool(b) => Value::Bool(!b),
+                _ => bail!("unary '!' expects Bool"),
             },
             Expr::Ident(name) => {
                 if let Some(v) = self.get_var(&name) {

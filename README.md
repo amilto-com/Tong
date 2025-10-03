@@ -265,6 +265,29 @@ Recent improvements:
 * Partial application generalized to constructors.
 * Nested constructor patterns (example: `nested_patterns.tong`).
 * Implicit last-expression return in function bodies (you can omit `return` for final expression).
+* Short-circuit logical operators `&` (AND), `||` (OR) and unary `!` (NOT).
+* Array element update sugar: `arr[i] = expr` (clones + updates underlying array immutably).
+
+### Operator Precedence (highest → lowest)
+
+The parser implements a conventional precedence ladder. Parentheses `(...)` may always be used to override defaults.
+
+1. Indexing / Property / Call chaining: `arr[i]`, `obj.prop`, `func(x)` (left-associative)
+2. Unary prefix: `!expr`, `-expr`, `+expr`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Comparison: `<`, `<=`, `>`, `>=`
+6. Equality: `==`, `!=`
+7. Logical AND: `&` (short‑circuit)
+8. Logical OR: `||` (short‑circuit)
+
+Notes:
+* All binary operators are left-associative currently.
+* `&` and `||` short‑circuit: the right operand is only evaluated if needed.
+* Unary `!` expects a Bool; unary `-` expects numeric.
+* There is no assignment expression; `=` is only a statement form (`let x = ...` or `x = ...`).
+* `arr[i] = v` is syntactic sugar for cloning the array and writing index `i`; bounds checked.
+* Future additions (e.g. exponentiation) may introduce a new higher precedence tier.
 
 Planned next:
 * Additional guarded pattern clause examples (showing ordering & guard short‑circuit).
