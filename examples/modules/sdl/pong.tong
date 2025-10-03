@@ -100,6 +100,16 @@ fn draw_number(sdl, ren, x, y, n, t, w, h, r, g, b, a) {
   }
 }
 
+// Draw a number whose RIGHT edge is aligned at right_x (for right-justifying left player's score)
+// Supports 1-2 digits like draw_number. If more than 2 digits occur, alignment will drift (game unlikely to reach >99).
+fn draw_number_right(sdl, ren, right_x, y, n, t, w, h, r, g, b, a) {
+  let digit_w = w + 2*t
+  let width = digit_w
+  if n >= 10 { width = digit_w + t + digit_w }
+  let start_x = right_x - width
+  draw_number(sdl, ren, start_x, y, n, t, w, h, r, g, b, a)
+}
+
 fn main() {
   let sdl = import("sdl")
   sdl.init()
@@ -275,10 +285,12 @@ fn main() {
   let digit_w = w + 2*t
   let gap = 20
   let top_y = 20
-  let left_x = 400 - gap - digit_w - t
-  let right_x = 400 + gap
-  draw_number(sdl, ren, left_x, top_y, score1, t, w, h, 255, 255, 255, 255)
-  draw_number(sdl, ren, right_x, top_y, score2, t, w, h, 255, 255, 255, 255)
+  // Right anchor for left score (so it grows to the LEFT as digits increase)
+  let left_right_anchor = 400 - gap
+  // Left anchor for right score (so it grows to the RIGHT)
+  let right_left_anchor = 400 + gap
+  draw_number_right(sdl, ren, left_right_anchor, top_y, score1, t, w, h, 255, 255, 255, 255)
+  draw_number(sdl, ren, right_left_anchor, top_y, score2, t, w, h, 255, 255, 255, 255)
 
   sdl.present(ren)
     sdl.delay(16) // ~60 FPS
