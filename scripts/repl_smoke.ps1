@@ -6,10 +6,17 @@ Usage:
 #>
 [CmdletBinding()]
 param(
-    [switch]$Update
+        [switch]$Update
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+function Write-LFUtf8 {
+    param([string]$Path, [string]$Text)
+    $normalized = $Text -replace "`r?`n","`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $normalized, $utf8NoBom)
+}
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $root
@@ -101,7 +108,7 @@ try {
     $stdErr = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit()
     $combined = ($stdOut + $stdErr)
-    Set-Content -Path $tmp -Value $combined -Encoding UTF8
+    Write-LFUtf8 -Path $tmp -Text $combined
     if ($proc.ExitCode -ne 0) { throw "REPL exited with code $($proc.ExitCode)" }
 }
 catch {
@@ -113,7 +120,8 @@ catch {
 
 if ($Update) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $snapshot) | Out-Null
-    Copy-Item $tmp $snapshot -Force
+    $tmpContent = Get-Content $tmp -Raw
+    Write-LFUtf8 -Path $snapshot -Text $tmpContent
     Write-Host "[repl] snapshot (re)generated at $snapshot"
     Remove-Item $tmp -Force
     exit 0

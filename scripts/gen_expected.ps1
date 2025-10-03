@@ -11,6 +11,13 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Write-LFUtf8 {
+  param([string]$Path, [string]$Text)
+  $normalized = $Text -replace "`r?`n","`n"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $normalized, $utf8NoBom)
+}
+
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $root
 
@@ -22,20 +29,25 @@ $examples = Get-ChildItem -Path (Join-Path $root 'examples') -Recurse -Filter *.
 
 foreach ($f in $examples) {
   $rel = $f.FullName.Substring((Join-Path $root 'examples').Length) -replace '^[\\/]+',''
-  # Remove .tong extension cleanly without leaving trailing dot
-  $relNoExt = $rel -replace '\\.tong$',''
-  $target = Join-Path $outDir ($relNoExt + '.out')
-  $legacy = Join-Path $outDir ($relNoExt + '..out')
-  if ((-not (Test-Path $target)) -and (Test-Path $legacy)) {
-    # Migrate legacy double-dot file name
-    Move-Item -Force -Path $legacy -Destination $target
+  $baseName = [IO.Path]::GetFileNameWithoutExtension($rel)
+  $target = Join-Path $outDir ($baseName + '.out')
+  # Migrate legacy names if they exist (then normalize line endings)
+  foreach ($legacy in @( (Join-Path $outDir ($baseName + '..out')), (Join-Path $outDir ($baseName + '.tong.out')) )) {
+    if ((-not (Test-Path $target)) -and (Test-Path $legacy)) {
+      Move-Item -Force -Path $legacy -Destination $target
+      $migrated = Get-Content $target -Raw
+      Write-LFUtf8 -Path $target -Text $migrated
+    }
   }
   $targetDir = Split-Path -Parent $target
   if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
-  Write-Host "[gen] $rel -> examples/expected/$relNoExt.out"
+  Write-Host "[gen] $rel -> examples/expected/$baseName.out"
   $cargoCmd = "cargo run --quiet --manifest-path rust/tong/Cargo.toml -- `"$($f.FullName)`""
   $output = Invoke-Expression $cargoCmd 2>&1
-  Set-Content -Path $target -Value $output -Encoding UTF8
+  Write-LFUtf8 -Path $target -Text $output
 }
+
+# Final cleanup: remove any stray legacy files still present
+Get-ChildItem -Path $outDir -File | Where-Object { $_.Name -match '\\.tong\.out$' -or $_.Name -match '\\.\.out$' } | ForEach-Object { Remove-Item $_.FullName -Force }
 
 Write-Host "[gen] Done."

@@ -12,10 +12,17 @@ Env:
 #>
 [CmdletBinding()]
 param(
-  [string]$Files
+    [string]$Files
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+function Write-LFUtf8 {
+    param([string]$Path, [string]$Text)
+    $normalized = $Text -replace "`r?`n","`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $normalized, $utf8NoBom)
+}
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $root
@@ -45,11 +52,14 @@ $total = 0; $pass = 0; $updated = 0
 foreach ($f in $allFiles) {
     if ($f -match 'modules\\sdl\\') { continue }
     $rel = ($f.Substring($exampleRoot.Length) -replace '^[\\/]+' , '')
-    $relNoExt = $rel -replace '\\.tong$',''
-    $expected = Join-Path $expectedRoot ($relNoExt + '.out')
-    $legacy = Join-Path $expectedRoot ($relNoExt + '..out')
-    if (-not (Test-Path $expected) -and (Test-Path $legacy)) {
-        Move-Item -Force -Path $legacy -Destination $expected
+    $baseName = [IO.Path]::GetFileNameWithoutExtension($rel)
+    $expected = Join-Path $expectedRoot ($baseName + '.out')
+    $legacyDouble = Join-Path $expectedRoot ($baseName + '..out')
+    $legacyWithExt = Join-Path $expectedRoot ($baseName + '.tong.out')
+    foreach ($legacy in @($legacyDouble, $legacyWithExt)) {
+        if (-not (Test-Path $expected) -and (Test-Path $legacy)) {
+            Move-Item -Force -Path $legacy -Destination $expected
+        }
     }
     $total++
     Write-Host "[RUN ] $rel"
@@ -57,7 +67,7 @@ foreach ($f in $allFiles) {
     try {
         $cargoCmd = "cargo run --quiet --manifest-path rust/tong/Cargo.toml -- `"$f`""
         $output = Invoke-Expression $cargoCmd 2>&1
-        Set-Content -Path $tmp -Value $output -Encoding UTF8
+        Write-LFUtf8 -Path $tmp -Text $output
     } catch {
         Write-Host "[FAIL] runtime error: $rel" -ForegroundColor Red
         Get-Content $tmp | ForEach-Object { '    ' + $_ }
@@ -66,7 +76,8 @@ foreach ($f in $allFiles) {
     if (-not (Test-Path $expected)) {
         if ($update) {
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $expected) | Out-Null
-            Copy-Item $tmp $expected
+            $tmpContent = Get-Content $tmp -Raw
+            Write-LFUtf8 -Path $expected -Text $tmpContent
             Write-Host "[CREATE] $rel (snapshot)"
             $pass++; $updated++
         } else {
@@ -82,7 +93,8 @@ foreach ($f in $allFiles) {
         $pass++
     } else {
         if ($update) {
-            Copy-Item $tmp $expected -Force
+            $tmpContent2 = Get-Content $tmp -Raw
+            Write-LFUtf8 -Path $expected -Text $tmpContent2
             Write-Host "[UPDATE] $rel"
             $pass++; $updated++
         } else {
