@@ -1,0 +1,15 @@
+// Demonstrate redundancy / reachability warnings for pattern clause functions
+// Expect warnings about unreachable or redundant clauses.
+
+data Maybe = Just x | Nothing
+
+def id(Just(x)) { x }
+// Duplicate unguarded clause (redundant)
+def id(Just(y)) { y }
+// All-wildcard (terminates; later clause unreachable)
+def id(_) { 0 }
+// Unreachable due to preceding wildcard
+// This should trigger a warning.
+def id(Nothing) { -1 }
+
+print(id(Just(5)))

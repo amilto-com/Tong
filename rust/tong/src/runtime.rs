@@ -62,6 +62,71 @@ pub fn execute(program: Program) -> Result<()> {
         }
     }
 
+    // Basic redundancy / ordering warnings for pattern function clauses (heuristic).
+    // Warn if an all-wildcard clause is not last, or if a clause is strictly unreachable
+    // because an earlier clause has an equivalent key with no guard.
+    for (fname, clauses) in &env.pattern_funcs {
+        // Find all-wildcard position (all params wildcard / identifiers treated as wildcard)
+        let mut wildcard_pos: Option<usize> = None;
+        for (idx, (pats, guard, _body)) in clauses.iter().enumerate() {
+            if guard.is_none()
+                && pats
+                    .iter()
+                    .all(|p| matches!(p, Pattern::Wildcard | Pattern::Ident(_)))
+            {
+                wildcard_pos = Some(idx);
+                break;
+            }
+        }
+        if let Some(wi) = wildcard_pos {
+            if wi + 1 < clauses.len() && std::env::var("TONG_NO_MATCH_WARN").is_err() {
+                for later in (wi + 1)..clauses.len() {
+                    eprintln!(
+                        "[TONG][warn] unreachable pattern function clause #{} for '{}' (preceded by all-wildcard clause #{})",
+                        later, fname, wi
+                    );
+                }
+            }
+        }
+        // Duplicate key detection: create a simplified key per clause (ignores guards when present)
+        fn pat_key(p: &Pattern) -> String {
+            match p {
+                Pattern::Wildcard | Pattern::Ident(_) => "_".to_string(),
+                Pattern::Int(i) => format!("i:{}", i),
+                Pattern::Bool(b) => format!("b:{}", b),
+                Pattern::Constructor { name, sub, .. } => {
+                    if sub.is_empty() {
+                        format!("C:{}", name)
+                    } else {
+                        let inner: Vec<String> = sub.iter().map(pat_key).collect();
+                        format!("C:{}({})", name, inner.join(","))
+                    }
+                }
+                Pattern::Tuple(subs) => {
+                    let inner: Vec<String> = subs.iter().map(pat_key).collect();
+                    format!("T({})", inner.join(","))
+                }
+            }
+        }
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        for (idx, (pats, guard, _)) in clauses.iter().enumerate() {
+            if guard.is_some() {
+                continue; // Guards may differentiate runtime reachability; skip for now
+            }
+            let key = pats.iter().map(pat_key).collect::<Vec<_>>().join("|");
+            if let Some((_, prev_idx)) = seen.iter().find(|(k, _)| k == &key) {
+                if std::env::var("TONG_NO_MATCH_WARN").is_err() {
+                    eprintln!(
+                        "[TONG][warn] redundant pattern function clause #{} for '{}' (covered by earlier clause #{})",
+                        idx, fname, prev_idx
+                    );
+                }
+            } else {
+                seen.push((key, idx));
+            }
+        }
+    }
+
     // Execute top-level statements (import/let/assign/print)
     for stmt in &program.stmts {
         match stmt {
