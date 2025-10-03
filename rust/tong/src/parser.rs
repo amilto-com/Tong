@@ -45,7 +45,7 @@ pub enum Expr {
     ListComp {
         elem: Box<Expr>,
         generators: Vec<(String, Expr)>, // (var, list_expr) pairs, evaluated left-to-right
-        pred: Option<Box<Expr>>, // optional predicate applied after all bindings
+        pred: Option<Box<Expr>>,         // optional predicate applied after all bindings
     },
 }
 
@@ -55,7 +55,11 @@ pub enum Pattern {
     Ident(String),
     Int(i64),
     Bool(bool),
-    Constructor { name: String, arity: usize, sub: Vec<Pattern> },
+    Constructor {
+        name: String,
+        arity: usize,
+        sub: Vec<Pattern>,
+    },
     Tuple(Vec<Pattern>),
 }
 
@@ -68,6 +72,7 @@ pub enum Stmt {
     FnMain(Vec<Stmt>),
     FnDef(String, Vec<String>, Vec<Stmt>),
     FnDefGuarded(String, Vec<String>, Expr, Vec<Stmt>),
+    FnDefPattern(String, Vec<Pattern>, Option<Expr>, Vec<Stmt>), // pattern parameters with optional guard
     Import(String, String),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
@@ -79,7 +84,10 @@ pub enum Stmt {
 }
 
 #[derive(Debug, Clone)]
-pub struct Constructor { pub name: String, pub arity: usize }
+pub struct Constructor {
+    pub name: String,
+    pub arity: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -149,48 +157,126 @@ impl Parser {
     }
 
     fn parse_fn(&mut self) -> Result<Stmt> {
-        self.eat(TokenKind::Fn)?;
+        if self.peek_is(TokenKind::Fn) {
+            self.eat(TokenKind::Fn)?;
+        } else {
+            self.eat(TokenKind::Def)?;
+        }
         let name = self.eat_ident()?;
         self.eat(TokenKind::LParen)?;
-        let mut params = Vec::new();
-        if self.peek_is(TokenKind::Ident) {
-            params.push(self.eat_ident()?);
-            while self.peek_is(TokenKind::Comma) {
-                self.bump();
-                params.push(self.eat_ident()?);
+        // Capture raw parameter token spans to decide between simple identifiers and patterns.
+        let mut raw_params: Vec<(usize, usize)> = Vec::new();
+        if !self.peek_is(TokenKind::RParen) {
+            loop {
+                let start = self.pos;
+                let mut depth = 0usize;
+                while let Some(tok) = self.peek() {
+                    if depth == 0 && (tok.kind == TokenKind::Comma || tok.kind == TokenKind::RParen)
+                    {
+                        break;
+                    }
+                    match tok.kind {
+                        TokenKind::LParen => {
+                            depth += 1;
+                            self.bump();
+                        }
+                        TokenKind::RParen => {
+                            if depth == 0 {
+                                break;
+                            }
+                            depth -= 1;
+                            self.bump();
+                        }
+                        _ => {
+                            self.bump();
+                        }
+                    }
+                }
+                raw_params.push((start, self.pos));
+                if self.peek_is(TokenKind::Comma) {
+                    self.bump();
+                    continue;
+                }
+                break;
             }
         }
         self.eat(TokenKind::RParen)?;
-        // Optional guard: 'if <expr>' before body
-        if self.peek_is(TokenKind::If) {
-            self.bump();
-            let guard_expr = self.parse_expr()?;
-            self.eat(TokenKind::LBrace)?;
-            let mut body = Vec::new();
-            while !self.peek_is(TokenKind::RBrace) { body.push(self.parse_stmt()?); }
-            self.eat(TokenKind::RBrace)?;
-            if name == "main" && params.is_empty() {
-                return Ok(Stmt::FnMain(body));
+        let mut simple_idents: Vec<String> = Vec::new();
+        let mut patterns: Vec<Pattern> = Vec::new();
+        let mut all_simple = true;
+        for (s, e) in &raw_params {
+            if s == e {
+                continue;
             }
-            return Ok(Stmt::FnDefGuarded(name, params, guard_expr, body));
+            if *e - *s == 1 {
+                if let Some(tok) = self.tokens.get(*s) {
+                    if tok.kind == TokenKind::Ident && tok.text != "_" {
+                        // Heuristic: Leading uppercase => constructor pattern (zero arity)
+                        // Treat as pattern so that clauses like def f(Nothing) become pattern clauses
+                        let is_ctor_like = tok
+                            .text
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false);
+                        if is_ctor_like {
+                            all_simple = false; // force pattern function path
+                            patterns.push(Pattern::Constructor {
+                                name: tok.text.clone(),
+                                arity: 0,
+                                sub: Vec::new(),
+                            });
+                            continue;
+                        } else {
+                            simple_idents.push(tok.text.clone());
+                            patterns.push(Pattern::Ident(tok.text.clone()));
+                            continue;
+                        }
+                    }
+                }
+            }
+            // Complex or non-simple param: parse as pattern
+            all_simple = false;
+            let slice = self.tokens[*s..*e].to_vec();
+            let mut sub = Parser {
+                tokens: slice,
+                pos: 0,
+            };
+            let pat = sub.parse_pattern()?; // reuse pattern parser
+            patterns.push(pat);
         }
+        // Optional guard
+        let guard_expr = if self.peek_is(TokenKind::If) {
+            self.bump();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         self.eat(TokenKind::LBrace)?;
         let mut body = Vec::new();
         while !self.peek_is(TokenKind::RBrace) {
             body.push(self.parse_stmt()?);
         }
         self.eat(TokenKind::RBrace)?;
-        if name == "main" && params.is_empty() {
-            Ok(Stmt::FnMain(body))
-        } else {
-            Ok(Stmt::FnDef(name, params, body))
+        if name == "main" && all_simple && simple_idents.is_empty() {
+            return Ok(Stmt::FnMain(body));
         }
+        if all_simple {
+            if let Some(g) = guard_expr {
+                return Ok(Stmt::FnDefGuarded(name, simple_idents, g, body));
+            }
+            return Ok(Stmt::FnDef(name, simple_idents, body));
+        }
+        Ok(Stmt::FnDefPattern(name, patterns, guard_expr, body))
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
         if self.peek_is(TokenKind::Data) {
             self.bump();
             let type_name = self.eat_ident()?;
+            if !self.peek_is(TokenKind::Equal) {
+                bail!("expected '=' after type name in data declaration");
+            }
             self.eat(TokenKind::Equal)?;
             // constructors separated by '|', each name optionally followed by arity counted via Ident placeholders (simplified)
             let mut ctors = Vec::new();
@@ -200,10 +286,14 @@ impl Parser {
                 let mut arity = 0usize;
                 while self.peek_is(TokenKind::Ident) {
                     // lookahead stop if next is '=' which would start assignment, but for simplicity treat consecutive identifiers as params
-                    arity += 1; self.bump();
+                    arity += 1;
+                    self.bump();
                 }
                 ctors.push(Constructor { name: cname, arity });
-                if self.peek_is(TokenKind::Pipe) { self.bump(); continue; }
+                if self.peek_is(TokenKind::Pipe) {
+                    self.bump();
+                    continue;
+                }
                 break;
             }
             return Ok(Stmt::DataDecl(type_name, ctors));
@@ -217,7 +307,10 @@ impl Parser {
                 let mut names = Vec::new();
                 if !self.peek_is(TokenKind::RParen) {
                     names.push(self.eat_ident()?);
-                    while self.peek_is(TokenKind::Comma) { self.bump(); names.push(self.eat_ident()?); }
+                    while self.peek_is(TokenKind::Comma) {
+                        self.bump();
+                        names.push(self.eat_ident()?);
+                    }
                 }
                 self.eat(TokenKind::RParen)?;
                 self.eat(TokenKind::Equal)?;
@@ -238,7 +331,7 @@ impl Parser {
             let value = self.parse_expr()?;
             return Ok(Stmt::Let(name, value));
         }
-        if self.peek_is(TokenKind::Fn) {
+        if self.peek_is(TokenKind::Fn) || self.peek_is(TokenKind::Def) {
             return self.parse_fn();
         }
         if self.peek_is(TokenKind::Parallel) {
@@ -466,10 +559,15 @@ impl Parser {
         if self.peek_is(TokenKind::Backslash) {
             self.bump();
             let mut params = Vec::new();
-            while self.peek_is(TokenKind::Ident) { params.push(self.eat_ident()?); }
+            while self.peek_is(TokenKind::Ident) {
+                params.push(self.eat_ident()?);
+            }
             self.eat(TokenKind::Arrow)?;
             let body = self.parse_expr()?;
-            return Ok(Expr::Lambda { params, body: Box::new(body) });
+            return Ok(Expr::Lambda {
+                params,
+                body: Box::new(body),
+            });
         }
         // Lambda: |x| expr
         if self.peek_is(TokenKind::Pipe) {
@@ -495,14 +593,24 @@ impl Parser {
             let mut arms = Vec::new();
             while !self.peek_is(TokenKind::RBrace) {
                 let pat = self.parse_pattern()?;
-                let guard = if self.peek_is(TokenKind::If) { self.bump(); Some(self.parse_expr()?) } else { None };
+                let guard = if self.peek_is(TokenKind::If) {
+                    self.bump();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
                 self.eat(TokenKind::Arrow)?;
                 let body = self.parse_expr()?;
-                if self.peek_is(TokenKind::Comma) { self.bump(); }
+                if self.peek_is(TokenKind::Comma) {
+                    self.bump();
+                }
                 arms.push((pat, guard, body));
             }
             self.eat(TokenKind::RBrace)?;
-            return Ok(Expr::Match { scrutinee: Box::new(scrut), arms });
+            return Ok(Expr::Match {
+                scrutinee: Box::new(scrut),
+                arms,
+            });
         }
         if self.peek_is(TokenKind::String) {
             Ok(Expr::Str(
@@ -529,7 +637,9 @@ impl Parser {
                     let mut gens: Vec<(String, Expr)> = Vec::new();
                     loop {
                         let var = self.eat_ident()?;
-                        if !self.peek_is(TokenKind::In) { bail!("expected 'in' in list comprehension"); }
+                        if !self.peek_is(TokenKind::In) {
+                            bail!("expected 'in' in list comprehension");
+                        }
                         self.bump();
                         let list_expr = self.parse_expr()?;
                         gens.push((var, list_expr));
@@ -542,14 +652,28 @@ impl Parser {
                             } else {
                                 bail!("unexpected comma in list comprehension generators; expected another '<ident> in <expr>'");
                             }
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
-                    let pred = if self.peek_is(TokenKind::If) { self.bump(); Some(Box::new(self.parse_expr()?)) } else { None };
+                    let pred = if self.peek_is(TokenKind::If) {
+                        self.bump();
+                        Some(Box::new(self.parse_expr()?))
+                    } else {
+                        None
+                    };
                     self.eat(TokenKind::RBracket)?;
-                    Ok(Expr::ListComp { elem: Box::new(first), generators: gens, pred })
+                    Ok(Expr::ListComp {
+                        elem: Box::new(first),
+                        generators: gens,
+                        pred,
+                    })
                 } else {
                     let mut elems = vec![first];
-                    while self.peek_is(TokenKind::Comma) { self.bump(); elems.push(self.parse_expr()?); }
+                    while self.peek_is(TokenKind::Comma) {
+                        self.bump();
+                        elems.push(self.parse_expr()?);
+                    }
                     self.eat(TokenKind::RBracket)?;
                     Ok(Expr::Array(elems))
                 }
@@ -563,8 +687,15 @@ impl Parser {
             // function call on identifier
             if self.peek_is(TokenKind::LParen) {
                 // Distinguish constructor vs function by initial uppercase letter of ident
-                let name = match &node { Expr::Ident(n) => n.clone(), _ => String::new() };
-                let is_ctor_like = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                let name = match &node {
+                    Expr::Ident(n) => n.clone(),
+                    _ => String::new(),
+                };
+                let is_ctor_like = name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false);
                 self.eat(TokenKind::LParen)?;
                 let mut args = Vec::new();
                 if !self.peek_is(TokenKind::RParen) {
@@ -636,8 +767,14 @@ impl Parser {
     fn parse_pattern(&mut self) -> Result<Pattern> {
         if self.peek_is(TokenKind::Ident) {
             let name = self.eat_ident()?;
-            if name == "_" { return Ok(Pattern::Wildcard); }
-            let is_ctor = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+            if name == "_" {
+                return Ok(Pattern::Wildcard);
+            }
+            let is_ctor = name
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false);
             if is_ctor {
                 // Parenthesized constructor pattern arguments: Ctor(p1, p2, ...)
                 if self.peek_is(TokenKind::LParen) {
@@ -645,10 +782,17 @@ impl Parser {
                     let mut subs = Vec::new();
                     if !self.peek_is(TokenKind::RParen) {
                         subs.push(self.parse_pattern()?);
-                        while self.peek_is(TokenKind::Comma) { self.bump(); subs.push(self.parse_pattern()?); }
+                        while self.peek_is(TokenKind::Comma) {
+                            self.bump();
+                            subs.push(self.parse_pattern()?);
+                        }
                     }
                     self.eat(TokenKind::RParen)?;
-                    return Ok(Pattern::Constructor { name, arity: subs.len(), sub: subs });
+                    return Ok(Pattern::Constructor {
+                        name,
+                        arity: subs.len(),
+                        sub: subs,
+                    });
                 }
                 // Fallback: space-separated simple subpatterns (kept for backward compatibility: Just x, Node left right)
                 let mut subs = Vec::new();
@@ -658,18 +802,30 @@ impl Parser {
                         || self.peek_is(TokenKind::If)
                         || self.peek_is(TokenKind::Pipe)
                         || self.peek_is(TokenKind::RBrace)
-                        || self.peek_is(TokenKind::RParen) {
-                        break; }
+                        || self.peek_is(TokenKind::RParen)
+                    {
+                        break;
+                    }
                     let starts = self.peek_is(TokenKind::Ident)
                         || self.peek_is(TokenKind::Int)
                         || self.peek_is(TokenKind::True)
                         || self.peek_is(TokenKind::False)
                         || self.peek_is(TokenKind::LParen);
-                    if !starts { break; }
-                    if self.peek_is(TokenKind::Ident) && self.peek_text()=="_" { self.bump(); subs.push(Pattern::Wildcard); }
-                    else { subs.push(self.parse_pattern()?); }
+                    if !starts {
+                        break;
+                    }
+                    if self.peek_is(TokenKind::Ident) && self.peek_text() == "_" {
+                        self.bump();
+                        subs.push(Pattern::Wildcard);
+                    } else {
+                        subs.push(self.parse_pattern()?);
+                    }
                 }
-                return Ok(Pattern::Constructor { name, arity: subs.len(), sub: subs });
+                return Ok(Pattern::Constructor {
+                    name,
+                    arity: subs.len(),
+                    sub: subs,
+                });
             }
             return Ok(Pattern::Ident(name));
         }
@@ -678,14 +834,25 @@ impl Parser {
             let mut subs = Vec::new();
             if !self.peek_is(TokenKind::RParen) {
                 subs.push(self.parse_pattern()?);
-                while self.peek_is(TokenKind::Comma) { self.bump(); subs.push(self.parse_pattern()?); }
+                while self.peek_is(TokenKind::Comma) {
+                    self.bump();
+                    subs.push(self.parse_pattern()?);
+                }
             }
             self.eat(TokenKind::RParen)?;
             return Ok(Pattern::Tuple(subs));
         }
-        if self.peek_is(TokenKind::Int) { return Ok(Pattern::Int(self.bump().unwrap().text.parse()?)); }
-        if self.peek_is(TokenKind::True) { self.bump(); return Ok(Pattern::Bool(true)); }
-        if self.peek_is(TokenKind::False) { self.bump(); return Ok(Pattern::Bool(false)); }
+        if self.peek_is(TokenKind::Int) {
+            return Ok(Pattern::Int(self.bump().unwrap().text.parse()?));
+        }
+        if self.peek_is(TokenKind::True) {
+            self.bump();
+            return Ok(Pattern::Bool(true));
+        }
+        if self.peek_is(TokenKind::False) {
+            self.bump();
+            return Ok(Pattern::Bool(false));
+        }
         bail!("unsupported pattern");
     }
 

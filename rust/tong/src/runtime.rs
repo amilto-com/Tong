@@ -1,14 +1,20 @@
+#[cfg(feature = "sdl3")]
+use anyhow::anyhow; // anyhow! macro for SDL code paths
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 #[cfg(feature = "sdl3")]
-use anyhow::anyhow; // anyhow! macro for SDL code paths
-#[cfg(feature = "sdl3")]
 use std::time::Duration; // Duration used in sdl_delay
 
-use crate::parser::{BinOp, Expr, Program, Stmt, Pattern};
+use crate::parser::{BinOp, Expr, Pattern, Program, Stmt};
+
+// Clause type aliases to keep signatures and storage readable (avoid clippy::type_complexity)
+type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
+type PatternClause = (Vec<Pattern>, Option<Expr>, Vec<Stmt>);
 
 // Built-in module registry (update when adding more modules)
-pub fn builtin_modules() -> Vec<&'static str> { vec!["sdl", "linalg"] }
+pub fn builtin_modules() -> Vec<&'static str> {
+    vec!["sdl", "linalg"]
+}
 
 // Core built-in functions (non-module) recognized directly by the evaluator.
 // Keep in sync with match arms in Expr::Call in eval_expr.
@@ -25,27 +31,89 @@ pub fn execute(program: Program) -> Result<()> {
     // First collect function definitions
     for stmt in &program.stmts {
         match stmt {
-            Stmt::FnDef(name, params, body) => { env.funcs.insert(name.clone(), (params.clone(), body.clone())); }
-            Stmt::FnDefGuarded(name, params, guard, body) => {
-                env.guarded_funcs.entry(name.clone()).or_default().push((params.clone(), guard.clone(), body.clone()));
+            Stmt::FnDef(name, params, body) => {
+                env.funcs
+                    .insert(name.clone(), (params.clone(), body.clone()));
             }
-            Stmt::FnMain(body) => { env.funcs.insert("main".to_string(), (Vec::new(), body.clone())); }
-            Stmt::DataDecl(_, ctors) => { for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); } }
+            Stmt::FnDefGuarded(name, params, guard, body) => {
+                env.guarded_funcs.entry(name.clone()).or_default().push((
+                    params.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnDefPattern(name, patterns, guard, body) => {
+                env.pattern_funcs.entry(name.clone()).or_default().push((
+                    patterns.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnMain(body) => {
+                env.funcs
+                    .insert("main".to_string(), (Vec::new(), body.clone()));
+            }
+            Stmt::DataDecl(_, ctors) => {
+                for c in ctors {
+                    env.data_ctors.insert(c.name.clone(), c.arity);
+                }
+            }
             _ => {}
         }
     }
 
     // Execute top-level statements (import/let/assign/print)
-    for stmt in &program.stmts { match stmt {
-        Stmt::Import(name, module) => { let v = env.import_module(module)?; env.vars_mut().insert(name.clone(), v); }
-        Stmt::Let(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
-        Stmt::Assign(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
-        Stmt::LetTuple(names, expr) => { let v = env.eval_expr(expr.clone())?; match v { Value::Array(items) => { if items.len() != names.len() { bail!("tuple arity mismatch"); } for (n,it) in names.iter().zip(items.into_iter()) { env.vars_mut().insert(n.clone(), it); } }, _ => bail!("destructuring expects array value"), } }
-        Stmt::Print(args) => { let parts: Result<Vec<String>> = args.iter().cloned().map(|e| env.eval_expr(e).map(|v| format_value(&v))).collect(); println!("{}", parts?.join(" ")); }
-        Stmt::Expr(e) => { let _ = env.eval_expr(e.clone())?; }
-        Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); } env.type_ctors.insert(type_name.clone(), names); }
-        Stmt::FnDefGuarded(_,_,_,_) => { /* already collected */ }
-        _ => {} } }
+    for stmt in &program.stmts {
+        match stmt {
+            Stmt::Import(name, module) => {
+                let v = env.import_module(module)?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::Let(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::Assign(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::LetTuple(names, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                match v {
+                    Value::Array(items) => {
+                        if items.len() != names.len() {
+                            bail!("tuple arity mismatch");
+                        }
+                        for (n, it) in names.iter().zip(items.into_iter()) {
+                            env.vars_mut().insert(n.clone(), it);
+                        }
+                    }
+                    _ => bail!("destructuring expects array value"),
+                }
+            }
+            Stmt::Print(args) => {
+                let parts: Result<Vec<String>> = args
+                    .iter()
+                    .cloned()
+                    .map(|e| env.eval_expr(e).map(|v| format_value(&v)))
+                    .collect();
+                println!("{}", parts?.join(" "));
+            }
+            Stmt::Expr(e) => {
+                let _ = env.eval_expr(e.clone())?;
+            }
+            Stmt::DataDecl(type_name, ctors) => {
+                let mut names = Vec::new();
+                for c in ctors {
+                    env.data_ctors.insert(c.name.clone(), c.arity);
+                    names.push(c.name.clone());
+                }
+                env.type_ctors.insert(type_name.clone(), names);
+            }
+            Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
+            _ => {}
+        }
+    }
 
     Ok(())
 }
@@ -64,22 +132,28 @@ enum Value {
     },
     FuncRef(String),
     Object(HashMap<String, Value>),
-    Constructor { name: String, fields: Vec<Value> },
-    Partial { name: String, applied: Vec<Value> },
+    Constructor {
+        name: String,
+        fields: Vec<Value>,
+    },
+    Partial {
+        name: String,
+        applied: Vec<Value>,
+    },
 }
-
-type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
 
 #[derive(Default)]
 struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
     funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
-    #[allow(clippy::type_complexity)]
     guarded_funcs: HashMap<String, Vec<GuardedClause>>, // guarded multi-clause
+    pattern_funcs: HashMap<String, Vec<PatternClause>>, // pattern parameter clauses
     modules: HashMap<String, Value>,
-    #[cfg(not(feature = "sdl3"))] sdl_frame: i64,
-    #[cfg(feature = "sdl3")] sdl: Option<SdlState>,
-    data_ctors: HashMap<String, usize>, // ctor name -> arity
+    #[cfg(not(feature = "sdl3"))]
+    sdl_frame: i64,
+    #[cfg(feature = "sdl3")]
+    sdl: Option<SdlState>,
+    data_ctors: HashMap<String, usize>,       // ctor name -> arity
     type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
     ctor_type: HashMap<String, String>,       // ctor name -> type name
 }
@@ -140,21 +214,46 @@ impl Env {
                 Ok(None)
             }
             Stmt::FnDefGuarded(name, params, guard, body) => {
-                self.guarded_funcs.entry(name.clone()).or_default().push((params.clone(), guard.clone(), body.clone()));
+                self.guarded_funcs.entry(name.clone()).or_default().push((
+                    params.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+                Ok(None)
+            }
+            Stmt::FnDefPattern(name, patterns, guard, body) => {
+                self.pattern_funcs.entry(name.clone()).or_default().push((
+                    patterns.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
                 Ok(None)
             }
             Stmt::LetTuple(names, expr) => {
                 let v = self.eval_expr(expr.clone())?;
                 match v {
                     Value::Array(items) => {
-                        if items.len() != names.len() { bail!("tuple arity mismatch"); }
-                        for (n,it) in names.iter().zip(items.into_iter()) { self.vars_mut().insert(n.clone(), it); }
+                        if items.len() != names.len() {
+                            bail!("tuple arity mismatch");
+                        }
+                        for (n, it) in names.iter().zip(items.into_iter()) {
+                            self.vars_mut().insert(n.clone(), it);
+                        }
                         Ok(None)
                     }
                     _ => bail!("destructuring expects array value"),
                 }
             }
-            Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); self.ctor_type.insert(c.name.clone(), type_name.clone()); } self.type_ctors.insert(type_name.clone(), names); Ok(None) }
+            Stmt::DataDecl(type_name, ctors) => {
+                let mut names = Vec::new();
+                for c in ctors {
+                    self.data_ctors.insert(c.name.clone(), c.arity);
+                    names.push(c.name.clone());
+                    self.ctor_type.insert(c.name.clone(), type_name.clone());
+                }
+                self.type_ctors.insert(type_name.clone(), names);
+                Ok(None)
+            }
             Stmt::Expr(e) => {
                 let _ = self.eval_expr(e.clone())?;
                 Ok(None)
@@ -197,6 +296,7 @@ impl Env {
             vars_stack: vec![HashMap::new()],
             funcs: HashMap::new(),
             guarded_funcs: HashMap::new(),
+            pattern_funcs: HashMap::new(),
             modules: HashMap::new(),
             #[cfg(not(feature = "sdl3"))]
             sdl_frame: 0,
@@ -288,10 +388,22 @@ impl Env {
                 _ => bail!("unary '-' expects numeric"),
             },
             Expr::Ident(name) => {
-                if let Some(v) = self.get_var(&name) { v }
-                else if self.funcs.contains_key(&name) { Value::FuncRef(name) }
-                else if let Some(arity) = self.data_ctors.get(&name) { if *arity==0 { Value::Constructor { name, fields: vec![] } } else { Value::FuncRef(name) } }
-                else { bail!("undefined variable {}", name) }
+                if let Some(v) = self.get_var(&name) {
+                    v
+                } else if self.funcs.contains_key(&name) || self.pattern_funcs.contains_key(&name) {
+                    Value::FuncRef(name)
+                } else if let Some(arity) = self.data_ctors.get(&name) {
+                    if *arity == 0 {
+                        Value::Constructor {
+                            name,
+                            fields: vec![],
+                        }
+                    } else {
+                        Value::FuncRef(name)
+                    }
+                } else {
+                    bail!("undefined variable {}", name)
+                }
             }
             Expr::Array(items) => {
                 let mut out = Vec::new();
@@ -317,12 +429,23 @@ impl Env {
                 }
             }
             Expr::ConstructorCall { name, args } => {
-                let arity = *self.data_ctors.get(&name).ok_or_else(|| anyhow::anyhow!(format!("unknown constructor {}", name)))?;
-                let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                let arity = *self
+                    .data_ctors
+                    .get(&name)
+                    .ok_or_else(|| anyhow::anyhow!(format!("unknown constructor {}", name)))?;
+                let evaled: Result<Vec<Value>> =
+                    args.into_iter().map(|a| self.eval_expr(a)).collect();
                 let vals = evaled?;
-                if vals.len() < arity { Value::Partial { name, applied: vals } }
-                else if vals.len() == arity { Value::Constructor { name, fields: vals } }
-                else { bail!("constructor arity mismatch") }
+                if vals.len() < arity {
+                    Value::Partial {
+                        name,
+                        applied: vals,
+                    }
+                } else if vals.len() == arity {
+                    Value::Constructor { name, fields: vals }
+                } else {
+                    bail!("constructor arity mismatch")
+                }
             }
             Expr::Call { callee, args } => {
                 match callee.as_str() {
@@ -446,17 +569,26 @@ impl Env {
                         if let Some(v) = self.get_var(&callee) {
                             match v {
                                 Value::Lambda { params, body, env } => {
-                                    let evaled: Result<Vec<Value>> = args.iter().cloned().map(|a| self.eval_expr(a)).collect();
+                                    let evaled: Result<Vec<Value>> =
+                                        args.iter().cloned().map(|a| self.eval_expr(a)).collect();
                                     let vals = evaled?;
                                     if vals.len() < params.len() {
                                         // build new lambda with remaining params capturing applied ones
                                         let mut captured = env.clone();
-                                        for (p,vv) in params.iter().zip(vals.iter()) { captured.insert(p.clone(), vv.clone()); }
+                                        for (p, vv) in params.iter().zip(vals.iter()) {
+                                            captured.insert(p.clone(), vv.clone());
+                                        }
                                         let remaining = params[vals.len()..].to_vec();
-                                        Value::Lambda { params: remaining, body: body.clone(), env: captured }
-                                    } else if vals.len()==params.len() {
+                                        Value::Lambda {
+                                            params: remaining,
+                                            body: body.clone(),
+                                            env: captured,
+                                        }
+                                    } else if vals.len() == params.len() {
                                         self.call_lambda_values(params, *body, env, vals)?
-                                    } else { bail!("too many arguments for lambda") }
+                                    } else {
+                                        bail!("too many arguments for lambda")
+                                    }
                                 }
                                 Value::FuncRef(name) => {
                                     let evaled: Result<Vec<Value>> =
@@ -465,65 +597,152 @@ impl Env {
                                 }
                                 Value::Partial { name, applied } => {
                                     // extend partial
-                                    let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                                    let evaled: Result<Vec<Value>> =
+                                        args.into_iter().map(|a| self.eval_expr(a)).collect();
                                     let mut new_applied = applied.clone();
                                     new_applied.extend(evaled?);
                                     // Determine target arity (function or constructor)
                                     if let Some((params, _)) = self.funcs.get(&name) {
-                                        if new_applied.len() < params.len() { Value::Partial { name, applied: new_applied } }
-                                        else if new_applied.len()==params.len() { self.call_function_values(name, new_applied)? }
-                                        else { bail!("too many arguments for function partial") }
+                                        if new_applied.len() < params.len() {
+                                            Value::Partial {
+                                                name,
+                                                applied: new_applied,
+                                            }
+                                        } else if new_applied.len() == params.len() {
+                                            self.call_function_values(name, new_applied)?
+                                        } else {
+                                            bail!("too many arguments for function partial")
+                                        }
                                     } else if let Some(arity) = self.data_ctors.get(&name) {
-                                        if new_applied.len() < *arity { Value::Partial { name, applied: new_applied } }
-                                        else if new_applied.len()==*arity { Value::Constructor { name, fields: new_applied } }
-                                        else { bail!("too many arguments for constructor partial") }
-                                    } else { bail!("unknown target in partial") }
+                                        if new_applied.len() < *arity {
+                                            Value::Partial {
+                                                name,
+                                                applied: new_applied,
+                                            }
+                                        } else if new_applied.len() == *arity {
+                                            Value::Constructor {
+                                                name,
+                                                fields: new_applied,
+                                            }
+                                        } else {
+                                            bail!("too many arguments for constructor partial")
+                                        }
+                                    } else {
+                                        bail!("unknown target in partial")
+                                    }
                                 }
                                 _ => bail!("{} is not callable", callee),
                             }
                         } else if self.funcs.contains_key(&callee) {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
                             let (params, _) = self.funcs.get(&callee).cloned().unwrap();
-                            if vals.len() < params.len() { Value::Partial { name: callee.clone(), applied: vals } }
-                            else if vals.len() == params.len() { self.call_function_values(callee.clone(), vals)? }
-                            else { bail!("too many arguments") }
+                            if vals.len() < params.len() {
+                                Value::Partial {
+                                    name: callee.clone(),
+                                    applied: vals,
+                                }
+                            } else if vals.len() == params.len() {
+                                self.call_function_values(callee.clone(), vals)?
+                            } else {
+                                bail!("too many arguments")
+                            }
                         } else if self.guarded_funcs.contains_key(&callee) {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
                             let clauses = self.guarded_funcs.get(&callee).unwrap();
                             let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
-                            if vals.len() < arity { Value::Partial { name: callee.clone(), applied: vals } }
-                            else if vals.len()==arity { self.call_guarded_function_values(callee.clone(), vals)? }
-                            else { bail!("too many arguments") }
-                        } else if let Some(arity) = self.data_ctors.get(&callee).cloned() {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            if vals.len() < arity {
+                                Value::Partial {
+                                    name: callee.clone(),
+                                    applied: vals,
+                                }
+                            } else if vals.len() == arity {
+                                self.call_guarded_function_values(callee.clone(), vals)?
+                            } else {
+                                bail!("too many arguments")
+                            }
+                        } else if self.pattern_funcs.contains_key(&callee) {
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
-                            if vals.len() < arity { Value::Partial { name: callee, applied: vals } }
-                            else if vals.len() == arity { Value::Constructor { name: callee, fields: vals } }
-                            else { bail!("constructor arity mismatch") }
-                        } else if callee == "<partial>" { bail!("invalid partial placeholder") }
-                        else if self.guarded_funcs.contains_key(&callee) {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let clauses = self.pattern_funcs.get(&callee).unwrap();
+                            let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
+                            if vals.len() < arity {
+                                Value::Partial {
+                                    name: callee.clone(),
+                                    applied: vals,
+                                }
+                            } else if vals.len() == arity {
+                                self.call_pattern_function_values(callee.clone(), vals)?
+                            } else {
+                                bail!("too many arguments")
+                            }
+                        } else if let Some(arity) = self.data_ctors.get(&callee).cloned() {
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            if vals.len() < arity {
+                                Value::Partial {
+                                    name: callee,
+                                    applied: vals,
+                                }
+                            } else if vals.len() == arity {
+                                Value::Constructor {
+                                    name: callee,
+                                    fields: vals,
+                                }
+                            } else {
+                                bail!("constructor arity mismatch")
+                            }
+                        } else if callee == "<partial>" {
+                            bail!("invalid partial placeholder")
+                        } else if self.guarded_funcs.contains_key(&callee) {
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
                             // Determine arity from first clause
                             let clauses = self.guarded_funcs.get(&callee).unwrap();
                             let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
-                            if vals.len() < arity { Value::Partial { name: callee.clone(), applied: vals } }
-                            else if vals.len()==arity { self.call_guarded_function_values(callee.clone(), vals)? }
-                            else { bail!("too many arguments") }
-                        } else { bail!("unknown function {}", callee) }
+                            if vals.len() < arity {
+                                Value::Partial {
+                                    name: callee.clone(),
+                                    applied: vals,
+                                }
+                            } else if vals.len() == arity {
+                                self.call_guarded_function_values(callee.clone(), vals)?
+                            } else {
+                                bail!("too many arguments")
+                            }
+                        } else {
+                            bail!("unknown function {}", callee)
+                        }
                     }
                 }
             }
-            Expr::ListComp { elem, generators, pred } => {
+            Expr::ListComp {
+                elem,
+                generators,
+                pred,
+            } => {
                 // Recursive helper to bind generators left-to-right
-                fn eval_gens(env: &mut Env, gens: &[(String, Expr)], idx: usize, elem: &Expr, pred: &Option<Box<Expr>>, out: &mut Vec<Value>) -> Result<()> {
+                fn eval_gens(
+                    env: &mut Env,
+                    gens: &[(String, Expr)],
+                    idx: usize,
+                    elem: &Expr,
+                    pred: &Option<Box<Expr>>,
+                    out: &mut Vec<Value>,
+                ) -> Result<()> {
                     if idx == gens.len() {
                         // All generators bound; evaluate predicate then elem
                         if let Some(p) = pred {
                             let pv = env.eval_expr(*p.clone())?;
-                            if !matches!(pv, Value::Bool(true)) { return Ok(()); }
+                            if !matches!(pv, Value::Bool(true)) {
+                                return Ok(());
+                            }
                         }
                         let ev = env.eval_expr(elem.clone())?;
                         out.push(ev);
@@ -542,7 +761,10 @@ impl Env {
                             }
                             Ok(())
                         }
-                        _ => bail!("list comprehension expects array source for generator '{}'", var),
+                        _ => bail!(
+                            "list comprehension expects array source for generator '{}'",
+                            var
+                        ),
                     }
                 }
                 let mut out = Vec::new();
@@ -556,10 +778,22 @@ impl Env {
                 for (pat, guard, body) in arms.clone() {
                     self.vars_stack.push(HashMap::new());
                     let matched = self.match_pattern(&pat, &val)?;
-                    let guard_pass = if matched { if let Some(g) = guard.clone() { matches!(self.eval_expr(g)?, Value::Bool(true)) } else { true } } else { false };
-                    if matched && guard_pass { let res = self.eval_expr(body)?; self.vars_stack.pop();
+                    let guard_pass = if matched {
+                        if let Some(g) = guard.clone() {
+                            matches!(self.eval_expr(g)?, Value::Bool(true))
+                        } else {
+                            true
+                        }
+                    } else {
+                        false
+                    };
+                    if matched && guard_pass {
+                        let res = self.eval_expr(body)?;
+                        self.vars_stack.pop();
                         // crude exhaustiveness check: if no wildcard and scrutinee is a constructor with a known type, warn if uncovered ctors remain
-                        self.check_match_exhaustiveness(&*scrutinee, &arms)?; return Ok(res); }
+                        self.check_match_exhaustiveness(&scrutinee, &arms)?;
+                        return Ok(res);
+                    }
                     self.vars_stack.pop();
                 }
                 // no arm matched
@@ -637,41 +871,96 @@ impl Env {
                     match v {
                         Value::Lambda { params, body, env } => {
                             // Evaluate args then call with values to preserve object args
-                            let evaled: Result<Vec<Value>> = args.iter().cloned().map(|a| self.eval_expr(a)).collect();
+                            let evaled: Result<Vec<Value>> =
+                                args.iter().cloned().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
                             if vals.len() < params.len() {
                                 let mut captured = env.clone();
-                                for (p,vv) in params.iter().zip(vals.iter()) { captured.insert(p.clone(), vv.clone()); }
+                                for (p, vv) in params.iter().zip(vals.iter()) {
+                                    captured.insert(p.clone(), vv.clone());
+                                }
                                 let remaining = params[vals.len()..].to_vec();
-                                Ok(Value::Lambda { params: remaining, body: body.clone(), env: captured })
+                                Ok(Value::Lambda {
+                                    params: remaining,
+                                    body: body.clone(),
+                                    env: captured,
+                                })
                             } else if vals.len() == params.len() {
                                 self.call_lambda_values(params, *body, env, vals)
-                            } else { bail!("too many arguments for lambda") }
+                            } else {
+                                bail!("too many arguments for lambda")
+                            }
                         }
                         Value::FuncRef(fname) => {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-                            if self.funcs.contains_key(&fname) { self.call_function_values(fname, evaled?) }
-                            else if self.guarded_funcs.contains_key(&fname) { self.call_guarded_function_values(fname, evaled?) }
-                            else { bail!("unknown function {}", fname) }
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            if self.funcs.contains_key(&fname) {
+                                self.call_function_values(fname, evaled?)
+                            } else if self.guarded_funcs.contains_key(&fname) {
+                                self.call_guarded_function_values(fname, evaled?)
+                            } else if self.pattern_funcs.contains_key(&fname) {
+                                self.call_pattern_function_values(fname, evaled?)
+                            } else {
+                                bail!("unknown function {}", fname)
+                            }
                         }
                         Value::Partial { name, applied } => {
-                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let evaled: Result<Vec<Value>> =
+                                args.into_iter().map(|a| self.eval_expr(a)).collect();
                             let mut new_applied = applied.clone();
                             new_applied.extend(evaled?);
-                            if let Some((params,_)) = self.funcs.get(&name) {
-                                if new_applied.len() < params.len() { Ok(Value::Partial { name, applied: new_applied }) }
-                                else if new_applied.len() == params.len() { self.call_function_values(name, new_applied) }
-                                else { bail!("too many arguments for function partial") }
+                            if let Some((params, _)) = self.funcs.get(&name) {
+                                if new_applied.len() < params.len() {
+                                    Ok(Value::Partial {
+                                        name,
+                                        applied: new_applied,
+                                    })
+                                } else if new_applied.len() == params.len() {
+                                    self.call_function_values(name, new_applied)
+                                } else {
+                                    bail!("too many arguments for function partial")
+                                }
                             } else if let Some(clauses) = self.guarded_funcs.get(&name) {
                                 let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
-                                if new_applied.len() < arity { Ok(Value::Partial { name, applied: new_applied }) }
-                                else if new_applied.len()==arity { self.call_guarded_function_values(name, new_applied) }
-                                else { bail!("too many arguments for function partial") }
+                                if new_applied.len() < arity {
+                                    Ok(Value::Partial {
+                                        name,
+                                        applied: new_applied,
+                                    })
+                                } else if new_applied.len() == arity {
+                                    self.call_guarded_function_values(name, new_applied)
+                                } else {
+                                    bail!("too many arguments for function partial")
+                                }
+                            } else if let Some(patterns) = self.pattern_funcs.get(&name) {
+                                let arity = patterns.first().map(|c| c.0.len()).unwrap_or(0);
+                                if new_applied.len() < arity {
+                                    Ok(Value::Partial {
+                                        name,
+                                        applied: new_applied,
+                                    })
+                                } else if new_applied.len() == arity {
+                                    self.call_pattern_function_values(name, new_applied)
+                                } else {
+                                    bail!("too many arguments for function partial")
+                                }
                             } else if let Some(arity) = self.data_ctors.get(&name) {
-                                if new_applied.len() < *arity { Ok(Value::Partial { name, applied: new_applied }) }
-                                else if new_applied.len() == *arity { Ok(Value::Constructor { name, fields: new_applied }) }
-                                else { bail!("too many arguments for constructor partial") }
-                            } else { bail!("unknown target in partial") }
+                                if new_applied.len() < *arity {
+                                    Ok(Value::Partial {
+                                        name,
+                                        applied: new_applied,
+                                    })
+                                } else if new_applied.len() == *arity {
+                                    Ok(Value::Constructor {
+                                        name,
+                                        fields: new_applied,
+                                    })
+                                } else {
+                                    bail!("too many arguments for constructor partial")
+                                }
+                            } else {
+                                bail!("unknown target in partial")
+                            }
                         }
                         _ => bail!("{} is not callable", name),
                     }
@@ -735,42 +1024,127 @@ impl Env {
         result
     }
     fn call_function(&mut self, name: String, args: Vec<Expr>) -> Result<Value> {
-        if name.starts_with("sdl_") { return self.call_sdl_builtin(&name, args); }
-        if name.starts_with("linalg_") { let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect(); return self.call_linalg_builtin_values(&name, evaled?); }
+        if name.starts_with("sdl_") {
+            return self.call_sdl_builtin(&name, args);
+        }
+        if name.starts_with("linalg_") {
+            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+            return self.call_linalg_builtin_values(&name, evaled?);
+        }
         if let Some((params, body)) = self.funcs.get(&name).cloned() {
-            if params.len()!=args.len() { bail!("arity mismatch for {}", name); }
+            if params.len() != args.len() {
+                bail!("arity mismatch for {}", name);
+            }
             self.vars_stack.push(HashMap::new());
-            for (p,a) in params.iter().zip(args.into_iter()) { let val = self.eval_expr(a)?; self.vars_mut().insert(p.clone(), val); }
-            let ret = self.exec_block(&body)?; self.vars_stack.pop();
+            for (p, a) in params.iter().zip(args.into_iter()) {
+                let val = self.eval_expr(a)?;
+                self.vars_mut().insert(p.clone(), val);
+            }
+            let ret = self.exec_block(&body)?;
+            self.vars_stack.pop();
             Ok(ret.unwrap_or(Value::Int(0)))
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
-            if clauses.is_empty() { bail!("no clauses for guarded function {name}"); }
+            if clauses.is_empty() {
+                bail!("no clauses for guarded function {name}");
+            }
             let arity = clauses[0].0.len();
-            if arity != args.len() { bail!("arity mismatch for {}", name); }
+            if arity != args.len() {
+                bail!("arity mismatch for {}", name);
+            }
             let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
             self.call_guarded_function_values(name, evaled?)
-        } else { bail!("unknown function {}", name) }
+        } else if let Some(pattern_clauses) = self.pattern_funcs.get(&name).cloned() {
+            // Determine arity from first clause's pattern count
+            if let Some(first) = pattern_clauses.first() {
+                let arity = first.0.len();
+                if arity != args.len() {
+                    bail!("arity mismatch for {}", name);
+                }
+                // Evaluate args once
+                let evaled: Result<Vec<Value>> =
+                    args.into_iter().map(|a| self.eval_expr(a)).collect();
+                self.call_pattern_function_values(name, evaled?)
+            } else {
+                bail!("no pattern clauses for {}", name)
+            }
+        } else {
+            bail!("unknown function {}", name)
+        }
     }
 
     // Function call with pre-evaluated values (avoids expr_from_value conversion issues for objects)
     fn call_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
-        if name.starts_with("sdl_") { bail!("internal: call_function_values should not be used for SDL builtins"); }
-        if name.starts_with("linalg_") { return self.call_linalg_builtin_values(&name, values); }
+        if name.starts_with("sdl_") {
+            bail!("internal: call_function_values should not be used for SDL builtins");
+        }
+        if name.starts_with("linalg_") {
+            return self.call_linalg_builtin_values(&name, values);
+        }
         if let Some((params, body)) = self.funcs.get(&name).cloned() {
-            if params.len()!=values.len() { bail!("arity mismatch for {}", name); }
+            if params.len() != values.len() {
+                bail!("arity mismatch for {}", name);
+            }
             self.vars_stack.push(HashMap::new());
-            for (p,v) in params.iter().zip(values.into_iter()) { self.vars_mut().insert(p.clone(), v); }
-            let ret = self.exec_block(&body)?; self.vars_stack.pop();
+            for (p, v) in params.iter().zip(values.into_iter()) {
+                self.vars_mut().insert(p.clone(), v);
+            }
+            let ret = self.exec_block(&body)?;
+            self.vars_stack.pop();
             Ok(ret.unwrap_or(Value::Int(0)))
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
             let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
-            if arity != values.len() { bail!("arity mismatch for {}", name); }
+            if arity != values.len() {
+                bail!("arity mismatch for {}", name);
+            }
             self.call_guarded_function_values(name, values)
-        } else { bail!("unknown function {}", name) }
+        } else if let Some(_clauses) = self.pattern_funcs.get(&name).cloned() {
+            self.call_pattern_function_values(name, values)
+        } else {
+            bail!("unknown function {}", name)
+        }
+    }
+
+    fn call_pattern_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
+        let clauses = self
+            .pattern_funcs
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!(format!("unknown pattern function {name}")))?;
+        for (patterns, guard, body) in clauses {
+            if patterns.len() != values.len() {
+                bail!("arity mismatch for {name}");
+            }
+            self.vars_stack.push(HashMap::new());
+            let mut all_match = true;
+            for (p, v) in patterns.iter().zip(values.iter()) {
+                if !self.match_pattern(p, v)? {
+                    all_match = false;
+                    break;
+                }
+            }
+            if all_match {
+                let guard_ok = if let Some(gexpr) = guard.clone() {
+                    matches!(self.eval_expr(gexpr)?, Value::Bool(true))
+                } else {
+                    true
+                };
+                if guard_ok {
+                    let ret = self.exec_block(&body)?;
+                    self.vars_stack.pop();
+                    return Ok(ret.unwrap_or(Value::Int(0)));
+                }
+            }
+            self.vars_stack.pop();
+        }
+        bail!("no pattern clause matched for {name}")
     }
 
     fn call_guarded_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
-        let clauses = self.guarded_funcs.get(&name).cloned().ok_or_else(|| anyhow::anyhow!(format!("unknown guarded function {name}")))?;
+        let clauses = self
+            .guarded_funcs
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!(format!("unknown guarded function {name}")))?;
         for (params, guard_expr, body) in clauses {
             if params.len() != values.len() {
                 bail!("arity mismatch for {name}");
@@ -794,21 +1168,43 @@ impl Env {
     // Very shallow exhaustiveness check: if scrutinee is a constructor value (or Ident referencing a constructor) and match arms enumerate some constructors without wildcard,
     // warn about missing constructors of the same type. Since types are not tracked, we approximate by collecting constructor names used in patterns and comparing against
     // all constructors known globally whose arity matches the arities seen. This is heuristic but useful for early feedback.
-    fn check_match_exhaustiveness(&self, _scrutinee_expr: &Expr, arms: &[(Pattern, Option<Expr>, Expr)]) -> Result<()> {
+    fn check_match_exhaustiveness(
+        &self,
+        _scrutinee_expr: &Expr,
+        arms: &[(Pattern, Option<Expr>, Expr)],
+    ) -> Result<()> {
         // If any wildcard present, treat as exhaustive
-        if arms.iter().any(|(p,_,_)| matches!(p, Pattern::Wildcard)) { return Ok(()); }
+        if arms.iter().any(|(p, _, _)| matches!(p, Pattern::Wildcard)) {
+            return Ok(());
+        }
         // Collect constructor names used in top-level patterns
         let mut used: Vec<String> = Vec::new();
-        for (p,_,_) in arms { if let Pattern::Constructor { name, .. } = p { if !used.contains(name) { used.push(name.clone()); } } }
-        if used.is_empty() { return Ok(()); }
+        for (p, _, _) in arms {
+            if let Pattern::Constructor { name, .. } = p {
+                if !used.contains(name) {
+                    used.push(name.clone());
+                }
+            }
+        }
+        if used.is_empty() {
+            return Ok(());
+        }
         // Determine candidate type: pick first used constructor and map to its type (reverse map).
         if let Some(first_ctor) = used.first() {
             if let Some(ty) = self.ctor_type.get(first_ctor) {
                 if let Some(ctors) = self.type_ctors.get(ty) {
-                    let missing: Vec<&String> = ctors.iter().filter(|c| !used.contains(c)).collect();
+                    let missing: Vec<&String> =
+                        ctors.iter().filter(|c| !used.contains(c)).collect();
                     if !missing.is_empty() && std::env::var("TONG_NO_MATCH_WARN").is_err() {
-                        let mut first = true; let mut list = String::new();
-                        for m in missing { if !first { list.push(','); } list.push_str(m); first=false; }
+                        let mut first = true;
+                        let mut list = String::new();
+                        for m in missing {
+                            if !first {
+                                list.push(',');
+                            }
+                            list.push_str(m);
+                            first = false;
+                        }
                         eprintln!("[TONG][warn] non-exhaustive match for type '{ty}'; missing constructors: {list}");
                     }
                 }
@@ -835,7 +1231,8 @@ impl Env {
         for (idx, (pat, guard, _body)) in arms.iter().enumerate() {
             if wildcard_seen {
                 // If earlier wildcard had a guard, later arms might still be relevant; only treat as unreachable if earlier wildcard had no guard
-                if seen_unconditional.contains("_") && std::env::var("TONG_NO_MATCH_WARN").is_err() {
+                if seen_unconditional.contains("_") && std::env::var("TONG_NO_MATCH_WARN").is_err()
+                {
                     eprintln!("[TONG][warn] unreachable match arm #{idx} (follows wildcard)");
                 }
                 continue;
@@ -843,11 +1240,19 @@ impl Env {
             let is_unconditional_guard = guard.is_none();
             if let Some(k) = key(pat) {
                 if k == "_" {
-                    if is_unconditional_guard { seen_unconditional.insert(k.clone()); }
-                    wildcard_seen = true; continue; }
+                    if is_unconditional_guard {
+                        seen_unconditional.insert(k.clone());
+                    }
+                    wildcard_seen = true;
+                    continue;
+                }
                 if is_unconditional_guard {
-                    if seen_unconditional.contains(&k) && std::env::var("TONG_NO_MATCH_WARN").is_err() {
-                        eprintln!("[TONG][warn] redundant match arm #{idx} (pattern already covered)");
+                    if seen_unconditional.contains(&k)
+                        && std::env::var("TONG_NO_MATCH_WARN").is_err()
+                    {
+                        eprintln!(
+                            "[TONG][warn] redundant match arm #{idx} (pattern already covered)"
+                        );
                     } else {
                         seen_unconditional.insert(k);
                     }
@@ -877,7 +1282,19 @@ fn format_value(v: &Value) -> String {
         Value::FuncRef(name) => format!("<func:{}>", name),
         Value::Object(_) => "<object>".to_string(),
         Value::Constructor { name, fields } => {
-            if fields.is_empty() { name.clone() } else { format!("{}({})", name, fields.iter().map(format_value).collect::<Vec<_>>().join(",")) }
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                format!(
+                    "{}({})",
+                    name,
+                    fields
+                        .iter()
+                        .map(format_value)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
         }
         Value::Partial { name, applied } => format!("<partial:{}:{}>", name, applied.len()),
     }
@@ -908,27 +1325,42 @@ impl Env {
     fn match_pattern(&mut self, pat: &Pattern, v: &Value) -> Result<bool> {
         Ok(match pat {
             Pattern::Wildcard => true,
-            Pattern::Ident(name) => { self.vars_mut().insert(name.clone(), v.clone()); true }
+            Pattern::Ident(name) => {
+                self.vars_mut().insert(name.clone(), v.clone());
+                true
+            }
             Pattern::Int(i) => matches!(v, Value::Int(j) if j==i),
             Pattern::Bool(b) => matches!(v, Value::Bool(bb) if bb==b),
             Pattern::Constructor { name, arity, sub } => {
                 if let Value::Constructor { name: cn, fields } = v {
-                    if cn == name && fields.len()==*arity {
+                    if cn == name && fields.len() == *arity {
                         for (sp, fv) in sub.iter().zip(fields.iter()) {
-                            if !self.match_pattern(sp, fv)? { return Ok(false); }
+                            if !self.match_pattern(sp, fv)? {
+                                return Ok(false);
+                            }
                         }
                         true
-                    } else { false }
-                } else { false }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             Pattern::Tuple(subs) => {
                 if let Value::Array(items) = v {
-                    if items.len() != subs.len() { return Ok(false); }
+                    if items.len() != subs.len() {
+                        return Ok(false);
+                    }
                     for (p, iv) in subs.iter().zip(items.iter()) {
-                        if !self.match_pattern(p, iv)? { return Ok(false); }
+                        if !self.match_pattern(p, iv)? {
+                            return Ok(false);
+                        }
                     }
                     true
-                } else { false }
+                } else {
+                    false
+                }
             }
         })
     }
@@ -958,7 +1390,8 @@ impl Env {
             // Provide a one-time notice that this build is headless for SDL.
             if !self.modules.contains_key("__sdl_notice_shown") {
                 eprintln!("[TONG][SDL] Built without 'sdl3' feature: using headless shim (no real window). Rebuild with --features sdl3 for graphics.");
-                self.modules.insert("__sdl_notice_shown".to_string(), Value::Bool(true));
+                self.modules
+                    .insert("__sdl_notice_shown".to_string(), Value::Bool(true));
             }
         }
         // constants
@@ -1065,7 +1498,10 @@ impl Env {
             match v {
                 Value::Array(items) => items
                     .iter()
-                    .map(|x| match x { Value::Int(i) if *i>=0 => Ok(*i as usize), _ => bail!("shape/index must be non-negative ints") })
+                    .map(|x| match x {
+                        Value::Int(i) if *i >= 0 => Ok(*i as usize),
+                        _ => bail!("shape/index must be non-negative ints"),
+                    })
                     .collect(),
                 _ => bail!("expected array of ints"),
             }
@@ -1074,7 +1510,11 @@ impl Env {
             match v {
                 Value::Array(items) => items
                     .iter()
-                    .map(|x| match x { Value::Int(i) => Ok(*i as f64), Value::Float(f) => Ok(*f), _ => bail!("expected numeric array") })
+                    .map(|x| match x {
+                        Value::Int(i) => Ok(*i as f64),
+                        Value::Float(f) => Ok(*f),
+                        _ => bail!("expected numeric array"),
+                    })
                     .collect(),
                 _ => bail!("expected numeric array"),
             }
@@ -1095,108 +1535,219 @@ impl Env {
         fn is_tensor(v: &Value) -> Option<(Vec<usize>, Vec<f64>)> {
             if let Value::Object(map) = v {
                 if let Some(Value::Bool(true)) = map.get("__tensor__") {
-                    if let (Some(Value::Array(shape_vals)), Some(Value::Array(data_vals))) = (map.get("shape"), map.get("data")) {
+                    if let (Some(Value::Array(shape_vals)), Some(Value::Array(data_vals))) =
+                        (map.get("shape"), map.get("data"))
+                    {
                         let mut shape = Vec::new();
-                        for sv in shape_vals { if let Value::Int(i) = sv { shape.push(*i as usize); } else { return None; } }
+                        for sv in shape_vals {
+                            if let Value::Int(i) = sv {
+                                shape.push(*i as usize);
+                            } else {
+                                return None;
+                            }
+                        }
                         let mut data = Vec::new();
-                        for dv in data_vals { match dv { Value::Int(i)=> data.push(*i as f64), Value::Float(f)=> data.push(*f), _ => return None } }
+                        for dv in data_vals {
+                            match dv {
+                                Value::Int(i) => data.push(*i as f64),
+                                Value::Float(f) => data.push(*f),
+                                _ => return None,
+                            }
+                        }
                         return Some((shape, data));
                     }
                 }
             }
             None
         }
-        fn numel(shape: &[usize]) -> usize { shape.iter().product() }
-        fn flat_index(shape:&[usize], idx:&[usize]) -> Result<usize> {
-            if shape.len()!=idx.len() { bail!("index rank mismatch"); }
+        fn numel(shape: &[usize]) -> usize {
+            shape.iter().product()
+        }
+        fn flat_index(shape: &[usize], idx: &[usize]) -> Result<usize> {
+            if shape.len() != idx.len() {
+                bail!("index rank mismatch");
+            }
             let mut stride = 1usize;
             let mut strides = vec![0; shape.len()];
-            for (i, d) in shape.iter().enumerate().rev() { strides[i] = stride; stride *= *d; }
+            for (i, d) in shape.iter().enumerate().rev() {
+                strides[i] = stride;
+                stride *= *d;
+            }
             let mut off = 0usize;
-            for (i,&ix) in idx.iter().enumerate() {
-                if ix>=shape[i] { bail!("index out of bounds"); }
-                off += ix*strides[i];
+            for (i, &ix) in idx.iter().enumerate() {
+                if ix >= shape[i] {
+                    bail!("index out of bounds");
+                }
+                off += ix * strides[i];
             }
             Ok(off)
         }
 
         match name {
             "linalg_zeros" => {
-                if values.len()!=1 { bail!("zeros(shape) expects 1 arg"); }
-                let shape = to_usize_vec(&values[0])?; let n = numel(&shape);
+                if values.len() != 1 {
+                    bail!("zeros(shape) expects 1 arg");
+                }
+                let shape = to_usize_vec(&values[0])?;
+                let n = numel(&shape);
                 Ok(new_tensor(vec![0.0; n], shape))
             }
             "linalg_ones" => {
-                if values.len()!=1 { bail!("ones(shape) expects 1 arg"); }
-                let shape = to_usize_vec(&values[0])?; let n = numel(&shape);
+                if values.len() != 1 {
+                    bail!("ones(shape) expects 1 arg");
+                }
+                let shape = to_usize_vec(&values[0])?;
+                let n = numel(&shape);
                 Ok(new_tensor(vec![1.0; n], shape))
             }
             "linalg_tensor" => {
-                if values.len()!=2 { bail!("tensor(data, shape) expects 2 args"); }
+                if values.len() != 2 {
+                    bail!("tensor(data, shape) expects 2 args");
+                }
                 let data = to_f64_vec(&values[0])?;
                 let shape = to_usize_vec(&values[1])?;
-                if data.len()!= numel(&shape) { bail!("data length does not match shape"); }
+                if data.len() != numel(&shape) {
+                    bail!("data length does not match shape");
+                }
                 Ok(new_tensor(data, shape))
             }
             "linalg_shape" => {
-                if values.len()!=1 { bail!("shape(t) expects 1 arg"); }
-                if let Some((shape,_)) = is_tensor(&values[0]) {
-                    Ok(Value::Array(shape.into_iter().map(|d| Value::Int(d as i64)).collect()))
-                } else { bail!("argument is not a tensor") }
+                if values.len() != 1 {
+                    bail!("shape(t) expects 1 arg");
+                }
+                if let Some((shape, _)) = is_tensor(&values[0]) {
+                    Ok(Value::Array(
+                        shape.into_iter().map(|d| Value::Int(d as i64)).collect(),
+                    ))
+                } else {
+                    bail!("argument is not a tensor")
+                }
             }
             "linalg_rank" => {
-                if values.len()!=1 { bail!("rank(t) expects 1 arg"); }
-                if let Some((shape,_)) = is_tensor(&values[0]) { Ok(Value::Int(shape.len() as i64)) } else { bail!("argument is not a tensor") }
+                if values.len() != 1 {
+                    bail!("rank(t) expects 1 arg");
+                }
+                if let Some((shape, _)) = is_tensor(&values[0]) {
+                    Ok(Value::Int(shape.len() as i64))
+                } else {
+                    bail!("argument is not a tensor")
+                }
             }
             "linalg_get" => {
-                if values.len()!=2 { bail!("get(t, idx) expects 2 args"); }
-                if let Some((shape,data)) = is_tensor(&values[0]) {
-                    let idxs = to_usize_vec(&values[1])?; let fi = flat_index(&shape,&idxs)?; Ok(Value::Float(data[fi]))
-                } else { bail!("argument is not a tensor") }
+                if values.len() != 2 {
+                    bail!("get(t, idx) expects 2 args");
+                }
+                if let Some((shape, data)) = is_tensor(&values[0]) {
+                    let idxs = to_usize_vec(&values[1])?;
+                    let fi = flat_index(&shape, &idxs)?;
+                    Ok(Value::Float(data[fi]))
+                } else {
+                    bail!("argument is not a tensor")
+                }
             }
             "linalg_set" => {
-                if values.len()!=3 { bail!("set(t, idx, v) expects 3 args"); }
-                if let Some((shape,mut data)) = is_tensor(&values[0]) {
-                    let idxs = to_usize_vec(&values[1])?; let fi = flat_index(&shape,&idxs)?;
-                    let val = match &values[2] { Value::Int(i)=> *i as f64, Value::Float(f)=> *f, _ => bail!("value must be numeric") };
-                    data[fi] = val; Ok(new_tensor(data, shape))
-                } else { bail!("argument is not a tensor") }
+                if values.len() != 3 {
+                    bail!("set(t, idx, v) expects 3 args");
+                }
+                if let Some((shape, mut data)) = is_tensor(&values[0]) {
+                    let idxs = to_usize_vec(&values[1])?;
+                    let fi = flat_index(&shape, &idxs)?;
+                    let val = match &values[2] {
+                        Value::Int(i) => *i as f64,
+                        Value::Float(f) => *f,
+                        _ => bail!("value must be numeric"),
+                    };
+                    data[fi] = val;
+                    Ok(new_tensor(data, shape))
+                } else {
+                    bail!("argument is not a tensor")
+                }
             }
             "linalg_add" | "linalg_sub" | "linalg_mul" => {
-                if values.len()!=2 { bail!("binary elementwise expects 2 args"); }
-                let (shape_a, data_a) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (shape_b, data_b) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if shape_a != shape_b { bail!("shape mismatch"); }
-                let data: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(a,b)| match name { "linalg_add" => a + b, "linalg_sub" => a - b, _ => a * b }).collect();
+                if values.len() != 2 {
+                    bail!("binary elementwise expects 2 args");
+                }
+                let (shape_a, data_a) =
+                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (shape_b, data_b) = is_tensor(&values[1])
+                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if shape_a != shape_b {
+                    bail!("shape mismatch");
+                }
+                let data: Vec<f64> = data_a
+                    .iter()
+                    .zip(data_b.iter())
+                    .map(|(a, b)| match name {
+                        "linalg_add" => a + b,
+                        "linalg_sub" => a - b,
+                        _ => a * b,
+                    })
+                    .collect();
                 Ok(new_tensor(data, shape_a))
             }
             "linalg_dot" => {
-                if values.len()!=2 { bail!("dot(a,b) expects 2 args"); }
-                let (shape_a, data_a) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (shape_b, data_b) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if shape_a.len()!=1 || shape_b.len()!=1 { bail!("dot expects 1-D tensors"); }
-                if shape_a[0] != shape_b[0] { bail!("length mismatch"); }
-                let mut s=0.0; for (a,b) in data_a.iter().zip(data_b.iter()) { s += a*b; }
+                if values.len() != 2 {
+                    bail!("dot(a,b) expects 2 args");
+                }
+                let (shape_a, data_a) =
+                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (shape_b, data_b) = is_tensor(&values[1])
+                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if shape_a.len() != 1 || shape_b.len() != 1 {
+                    bail!("dot expects 1-D tensors");
+                }
+                if shape_a[0] != shape_b[0] {
+                    bail!("length mismatch");
+                }
+                let mut s = 0.0;
+                for (a, b) in data_a.iter().zip(data_b.iter()) {
+                    s += a * b;
+                }
                 Ok(Value::Float(s))
             }
             "linalg_matmul" => {
-                if values.len()!=2 { bail!("matmul(a,b) expects 2 args"); }
-                let (sa, da) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (sb, db) = is_tensor(&values[1]).ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if sa.len()!=2 || sb.len()!=2 { bail!("matmul expects 2-D tensors"); }
-                if sa[1] != sb[0] { bail!("inner dimension mismatch"); }
-                let (m,k,n) = (sa[0], sa[1], sb[1]);
-                let mut out = vec![0.0; m*n];
-                for i in 0..m { for j in 0..n { let mut acc=0.0; for p in 0..k { acc += da[i*k + p]* db[p*n + j]; } out[i*n + j] = acc; } }
-                Ok(new_tensor(out, vec![m,n]))
+                if values.len() != 2 {
+                    bail!("matmul(a,b) expects 2 args");
+                }
+                let (sa, da) =
+                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
+                let (sb, db) = is_tensor(&values[1])
+                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
+                if sa.len() != 2 || sb.len() != 2 {
+                    bail!("matmul expects 2-D tensors");
+                }
+                if sa[1] != sb[0] {
+                    bail!("inner dimension mismatch");
+                }
+                let (m, k, n) = (sa[0], sa[1], sb[1]);
+                let mut out = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        let mut acc = 0.0;
+                        for p in 0..k {
+                            acc += da[i * k + p] * db[p * n + j];
+                        }
+                        out[i * n + j] = acc;
+                    }
+                }
+                Ok(new_tensor(out, vec![m, n]))
             }
             "linalg_transpose" => {
-                if values.len()!=1 { bail!("transpose(a) expects 1 arg"); }
-                let (s, d) = is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("argument not tensor"))?;
-                if s.len()!=2 { bail!("transpose expects rank-2 tensor"); }
-                let (m,n) = (s[0], s[1]);
-                let mut out = vec![0.0; m*n];
-                for i in 0..m { for j in 0..n { out[j*m + i] = d[i*n + j]; } }
+                if values.len() != 1 {
+                    bail!("transpose(a) expects 1 arg");
+                }
+                let (s, d) =
+                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("argument not tensor"))?;
+                if s.len() != 2 {
+                    bail!("transpose expects rank-2 tensor");
+                }
+                let (m, n) = (s[0], s[1]);
+                let mut out = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        out[j * m + i] = d[i * n + j];
+                    }
+                }
                 Ok(new_tensor(out, vec![s[1], s[0]]))
             }
             _ => bail!("unknown linalg builtin {}", name),
@@ -1217,7 +1768,7 @@ impl Repl {
     // Evaluate a source snippet, returning an optional printable value (final bare expression)
     pub fn eval_snippet(&mut self, src: &str) -> Result<Option<String>> {
         // Lex & parse new snippet each time; keep accumulated functions / vars
-    let tokens = crate::lexer::lex(src)?;
+        let tokens = crate::lexer::lex(src)?;
         let program = crate::parser::parse(tokens)?;
 
         // First collect function/main definitions without clearing existing ones
@@ -1283,7 +1834,9 @@ impl Repl {
     pub fn list_vars(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
         for (k, v) in self.env.vars() {
-            if k.starts_with("__") { continue; }
+            if k.starts_with("__") {
+                continue;
+            }
             out.push((k.clone(), format_value(v)));
         }
         out.sort_by(|a, b| a.0.cmp(&b.0));

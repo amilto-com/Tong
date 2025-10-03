@@ -14,6 +14,8 @@ pub enum TokenKind {
     Var,
     #[token("fn")]
     Fn,
+    #[token("def")]
+    Def,
     #[token("true")]
     True,
     #[token("false")]

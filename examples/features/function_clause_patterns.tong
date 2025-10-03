@@ -1,0 +1,17 @@
+data Maybe = Just x | Nothing
+
+def fromMaybe(Just(x)) { x }
+
+def fromMaybe(Nothing) { 0 }
+
+print(fromMaybe(Just(42)))
+print(fromMaybe(Nothing))
+
+data List = Cons head tail | Nil
+
+def length(Nil) { 0 }
+
+def length(Cons(_, xs)) { 1 + length(xs) }
+
+let xs = Cons(1, Cons(2, Cons(3, Nil)))
+print(length(xs))

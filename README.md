@@ -248,13 +248,14 @@ Early functional features inspired by Haskell (syntax may evolve):
 | Tuple destructuring | `let (a,b) = pair` | Source must be array-like same length |
 | Tuple patterns in match | `match t { (x,_,z) -> ... }` | Fixed-size array (tuple) patterns |
 | Guarded multi-clause functions | `fn fact(n) if n==0 {1}` / `fn fact(n) if n>0 { n*fact(n-1) }` | First passing guard executes |
+| Pattern clause functions (constructor patterns in params) | `def fromMaybe(Just(x)) { x } / def fromMaybe(Nothing) { 0 }` | Sugar over internal pattern match, supports guards |
 
 See `examples/features/` for runnable demonstrations.
 
 Current limitations:
 * Dynamic only (no static type checking yet).
 * No exhaustive / redundancy analysis for `match` (missing case triggers runtime error).
-* Pattern guards for function clauses are limited to a single guard expression (no clause pattern syntax yet like `fn f(Just(x)) { ... }`).
+* Each pattern clause supports a single guard: `def f(Just(x)) if x > 10 { ... }`.
 * Tuple patterns treat arrays as tuples; no variadic / rest patterns.
 * Error diagnostics are still minimal (work in progress).
 
@@ -266,7 +267,7 @@ Recent improvements:
 * Implicit last-expression return in function bodies (you can omit `return` for final expression).
 
 Planned next:
-* Clause pattern syntax for functions (`fn sum(Node(l,r)) { ... }`).
+* Additional guarded pattern clause examples (showing ordering & guard short‑circuit).
 * Exhaustiveness & redundancy warnings.
 * Type annotations & inference groundwork.
 * Improved partial introspection / debug printing.
