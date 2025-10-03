@@ -871,9 +871,39 @@ impl Env {
                 bail!("non-exhaustive match")
             }
             Expr::Binary { op, left, right } => {
-                let l = self.eval_expr(*left)?;
-                let r = self.eval_expr(*right)?;
-                match (l, r, op) {
+                // Short-circuit for logical AND
+                if let BinOp::And = op {
+                    let l = self.eval_expr(*left)?;
+                    match l {
+                        Value::Bool(false) => Value::Bool(false), // don't eval right
+                        Value::Bool(true) => {
+                            let r = self.eval_expr(*right)?;
+                            match r {
+                                Value::Bool(b) => Value::Bool(b),
+                                _ => bail!("right operand of '&' must be Bool"),
+                            }
+                        }
+                        _ => bail!("left operand of '&' must be Bool"),
+                    }
+                } else if let BinOp::Or = op {
+                    let l = self.eval_expr(*left)?;
+                    match l {
+                        Value::Bool(true) => Value::Bool(true), // short-circuit
+                        Value::Bool(false) => {
+                            let r = self.eval_expr(*right)?;
+                            match r {
+                                Value::Bool(b) => Value::Bool(b),
+                                _ => bail!("right operand of '||' must be Bool"),
+                            }
+                        }
+                        _ => bail!("left operand of '||' must be Bool"),
+                    }
+                } else {
+                    let l = self.eval_expr(*left)?;
+                    let r = self.eval_expr(*right)?;
+                    match (l, r, op) {
+                    // Logical AND: both operands must be Bool; left short-circuit implemented earlier by evaluating sequentially (we already evaluated r, so mimic semantics w/o side effects distinction). For true short-circuit we need special case before evaluating r; adjust above.
+                    (Value::Bool(a), Value::Bool(b), BinOp::And) => Value::Bool(a && b),
                     (Value::Int(a), Value::Int(b), BinOp::Add) => Value::Int(a + b),
                     (Value::Int(a), Value::Int(b), BinOp::Sub) => Value::Int(a - b),
                     (Value::Int(a), Value::Int(b), BinOp::Mul) => Value::Int(a * b),
@@ -926,7 +956,8 @@ impl Env {
                     (Value::Int(a), Value::Float(b), BinOp::Gt) => Value::Bool((a as f64) > b),
                     (Value::Int(a), Value::Float(b), BinOp::Ge) => Value::Bool((a as f64) >= b),
 
-                    (l, r, _) => bail!("unsupported operands for operation: {:?}", (l, r)),
+                        (l, r, _) => bail!("unsupported operands for operation: {:?}", (l, r)),
+                    }
                 }
             }
         };

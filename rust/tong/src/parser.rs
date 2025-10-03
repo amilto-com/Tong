@@ -129,6 +129,8 @@ pub enum BinOp {
     Le,
     Gt,
     Ge,
+    And,
+    Or,
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program> {
@@ -442,7 +444,28 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
-        self.parse_comparison()
+        self.parse_disjunction()
+    }
+
+    fn parse_disjunction(&mut self) -> Result<Expr> {
+        let mut node = self.parse_conjunction()?;
+        while self.peek_is(TokenKind::OrOr) {
+            self.bump();
+            let rhs = self.parse_conjunction()?;
+            node = Expr::Binary { op: BinOp::Or, left: Box::new(node), right: Box::new(rhs) };
+        }
+        Ok(node)
+    }
+
+    // conjunction precedence below comparison, above equality currently (we thread by calling comparison inside)
+    fn parse_conjunction(&mut self) -> Result<Expr> {
+        let mut node = self.parse_comparison()?;
+        while self.peek_is(TokenKind::Ampersand) {
+            self.bump();
+            let rhs = self.parse_comparison()?;
+            node = Expr::Binary { op: BinOp::And, left: Box::new(node), right: Box::new(rhs) };
+        }
+        Ok(node)
     }
 
     fn parse_equality(&mut self) -> Result<Expr> {

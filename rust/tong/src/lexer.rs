@@ -64,8 +64,12 @@ pub enum TokenKind {
     Colon,
     #[token(".")]
     Dot,
+    #[token("||")]
+    OrOr,
     #[token("|")]
     Pipe,
+    #[token("&")]
+    Ampersand,
     #[token("->")]
     Arrow,
     #[token("\\")]
