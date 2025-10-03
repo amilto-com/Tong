@@ -140,12 +140,8 @@ fn main() {
   let score1 = 0
   let score2 = 0
 
-  // Scoreboard segment configuration (defined once to avoid clobbering generic names each frame)
-  let seg_t = 6
-  let seg_w = 36
-  let seg_h = 54
-  let seg_gap = 20
-  let seg_top_y = 20
+  // (Per-frame scoreboard constants were originally inside the loop; restoring original naming & placement)
+  // We intentionally keep them simple (t,w,h,gap,top_y) for clarity and to match pre-branch behavior.
 
   let running = true
   while running {
@@ -292,14 +288,19 @@ fn main() {
     // Right paddle (bright magenta, brighter)
   sdl.fill_rect(ren, p2_x, p2_y, pw, ph, 255, 0, 255, 255)
     
-  // Draw scoreboard at top center in classic 7-seg style
-  let digit_w = seg_w + 2*seg_t
+  // Draw scoreboard at top center in classic 7-seg style (restored original variable names)
+  let t = 6
+  let w = 36
+  let h = 54
+  let digit_w = w + 2*t
+  let gap = 20
+  let top_y = 20
   // Right anchor for left score (so it grows to the LEFT as digits increase)
-  let left_right_anchor = 400 - seg_gap
+  let left_right_anchor = 400 - gap
   // Left anchor for right score (so it grows to the RIGHT)
-  let right_left_anchor = 400 + seg_gap
-  draw_number_right(sdl, ren, left_right_anchor, seg_top_y, score1, seg_t, seg_w, seg_h, 255, 255, 255, 255)
-  draw_number(sdl, ren, right_left_anchor, seg_top_y, score2, seg_t, seg_w, seg_h, 255, 255, 255, 255)
+  let right_left_anchor = 400 + gap
+  draw_number_right(sdl, ren, left_right_anchor, top_y, score1, t, w, h, 255, 255, 255, 255)
+  draw_number(sdl, ren, right_left_anchor, top_y, score2, t, w, h, 255, 255, 255, 255)
 
   sdl.present(ren)
     sdl.delay(16) // ~60 FPS
