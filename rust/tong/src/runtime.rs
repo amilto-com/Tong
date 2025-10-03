@@ -548,6 +548,8 @@ impl Env {
                 Value::Array(out)
             }
             Expr::Match { scrutinee, arms } => {
+                // Run redundancy analysis before executing match
+                self.check_match_redundancy(&arms);
                 let val = self.eval_expr(*scrutinee.clone())?;
                 for (pat, guard, body) in arms.clone() {
                     self.vars_stack.push(HashMap::new());
@@ -810,6 +812,45 @@ impl Env {
             }
         }
         Ok(())
+    }
+
+    fn check_match_redundancy(&self, arms: &[(Pattern, Option<Expr>, Expr)]) {
+        // Simple, heuristic redundancy detection.
+        use Pattern::*;
+        fn key(p: &Pattern) -> Option<String> {
+            match p {
+                Wildcard => Some("_".into()),
+                Int(i) => Some(format!("Int:{i}")),
+                Bool(b) => Some(format!("Bool:{b}")),
+                Constructor { name, arity, .. } => Some(format!("Ctor:{name}:{arity}")),
+                Tuple(ts) => Some(format!("Tuple:{}", ts.len())),
+                Ident(_) => None, // variable pattern always binds freshly; duplicates allowed
+            }
+        }
+        let mut seen_unconditional = std::collections::HashSet::new();
+        let mut wildcard_seen = false;
+        for (idx, (pat, guard, _body)) in arms.iter().enumerate() {
+            if wildcard_seen {
+                // If earlier wildcard had a guard, later arms might still be relevant; only treat as unreachable if earlier wildcard had no guard
+                if seen_unconditional.contains("_") {
+                    eprintln!("[TONG][warn] unreachable match arm #{idx} (follows wildcard)");
+                }
+                continue;
+            }
+            let is_unconditional_guard = guard.is_none();
+            if let Some(k) = key(pat) {
+                if k == "_" {
+                    if is_unconditional_guard { seen_unconditional.insert(k.clone()); }
+                    wildcard_seen = true; continue; }
+                if is_unconditional_guard {
+                    if seen_unconditional.contains(&k) {
+                        eprintln!("[TONG][warn] redundant match arm #{idx} (pattern already covered)");
+                    } else {
+                        seen_unconditional.insert(k);
+                    }
+                }
+            }
+        }
     }
 }
 
