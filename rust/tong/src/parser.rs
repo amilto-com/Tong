@@ -138,7 +138,11 @@ pub enum BinOp {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program> {
-    let mut p = Parser { tokens, pos: 0, known_ctors: std::collections::HashMap::new() };
+    let mut p = Parser {
+        tokens,
+        pos: 0,
+        known_ctors: std::collections::HashMap::new(),
+    };
     p.parse_program()
 }
 
@@ -242,12 +246,8 @@ impl Parser {
                     if tok.kind == TokenKind::Ident && tok.text != "_" {
                         // Prefer semantic detection: is token a known zero-arity constructor? Fallback heuristic.
                         let text = &tok.text;
-                        let semantic_ctor = self
-                            .known_ctors
-                            .get(text)
-                            .copied()
-                            .unwrap_or(usize::MAX)
-                            == 0;
+                        let semantic_ctor =
+                            self.known_ctors.get(text).copied().unwrap_or(usize::MAX) == 0;
                         let heuristic_ctor = text.len() > 1
                             && text
                                 .chars()
@@ -325,7 +325,10 @@ impl Parser {
                 }
                 self.known_ctors.insert(cname.clone(), arity);
                 ctors.push(Constructor { name: cname, arity });
-                if self.peek_is(TokenKind::Pipe) { self.bump(); continue; }
+                if self.peek_is(TokenKind::Pipe) {
+                    self.bump();
+                    continue;
+                }
                 break;
             }
             return Ok(Stmt::DataDecl(type_name, ctors));
@@ -471,7 +474,11 @@ impl Parser {
         while self.peek_is(TokenKind::OrOr) {
             self.bump();
             let rhs = self.parse_conjunction()?;
-            node = Expr::Binary { op: BinOp::Or, left: Box::new(node), right: Box::new(rhs) };
+            node = Expr::Binary {
+                op: BinOp::Or,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
         }
         Ok(node)
     }
@@ -481,7 +488,11 @@ impl Parser {
         while self.peek_is(TokenKind::Ampersand) {
             self.bump();
             let rhs = self.parse_comparison()?;
-            node = Expr::Binary { op: BinOp::And, left: Box::new(node), right: Box::new(rhs) };
+            node = Expr::Binary {
+                op: BinOp::And,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
         }
         Ok(node)
     }
@@ -640,10 +651,14 @@ impl Parser {
             let mut params = Vec::new();
             while self.peek_is(TokenKind::Ident) {
                 // Stop before '{'
-                if self.peek_n_is(0, TokenKind::LBrace) { break; }
+                if self.peek_n_is(0, TokenKind::LBrace) {
+                    break;
+                }
                 params.push(self.eat_ident()?);
                 // If next token is '{' break to parse body
-                if self.peek_is(TokenKind::LBrace) { break; }
+                if self.peek_is(TokenKind::LBrace) {
+                    break;
+                }
             }
             self.eat(TokenKind::LBrace)?;
             // Parse block as a sequence of statements; last expression (if any) acts as implicit return.
@@ -654,7 +669,10 @@ impl Parser {
             self.eat(TokenKind::RBrace)?;
             // Preserve full block semantics via an explicit Block expression (now actually constructing Expr::Block).
             let lambda_body = Expr::Block(body_stmts);
-            return Ok(Expr::Lambda { params, body: Box::new(lambda_body) });
+            return Ok(Expr::Lambda {
+                params,
+                body: Box::new(lambda_body),
+            });
         }
         // Backslash lambda: \x y -> expr
         if self.peek_is(TokenKind::Backslash) {
@@ -709,9 +727,16 @@ impl Parser {
                             }
                         }
                         self.eat(TokenKind::RParen)?;
-                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                        node = Expr::MethodCall {
+                            target: Box::new(node),
+                            method: name,
+                            args,
+                        };
                     } else {
-                        node = Expr::Property { target: Box::new(node), name };
+                        node = Expr::Property {
+                            target: Box::new(node),
+                            name,
+                        };
                     }
                     continue;
                 }
@@ -751,9 +776,16 @@ impl Parser {
                             }
                         }
                         self.eat(TokenKind::RParen)?;
-                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                        node = Expr::MethodCall {
+                            target: Box::new(node),
+                            method: name,
+                            args,
+                        };
                     } else {
-                        node = Expr::Property { target: Box::new(node), name };
+                        node = Expr::Property {
+                            target: Box::new(node),
+                            name,
+                        };
                     }
                     continue;
                 }
@@ -869,8 +901,7 @@ impl Parser {
                 let is_ctor_like = if let Some(_a) = self.known_ctors.get(&name) {
                     true
                 } else {
-                    name
-                        .chars()
+                    name.chars()
                         .next()
                         .map(|c| c.is_uppercase())
                         .unwrap_or(false)
@@ -914,9 +945,16 @@ impl Parser {
                             }
                         }
                         self.eat(TokenKind::RParen)?;
-                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                        node = Expr::MethodCall {
+                            target: Box::new(node),
+                            method: name,
+                            args,
+                        };
                     } else {
-                        node = Expr::Property { target: Box::new(node), name };
+                        node = Expr::Property {
+                            target: Box::new(node),
+                            name,
+                        };
                     }
                     continue;
                 }
