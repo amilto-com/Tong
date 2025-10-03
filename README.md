@@ -249,6 +249,7 @@ Early functional features inspired by Haskell (syntax may evolve):
 | Tuple patterns in match | `match t { (x,_,z) -> ... }` | Fixed-size array (tuple) patterns |
 | Guarded multi-clause functions | `fn fact(n) if n==0 {1}` / `fn fact(n) if n>0 { n*fact(n-1) }` | First passing guard executes |
 | Pattern clause functions (constructor patterns in params) | `def fromMaybe(Just(x)) { x } / def fromMaybe(Nothing) { 0 }` | Sugar over internal pattern match, supports guards |
+| Logical operators | `a & b`, `a || b`, `!a` | Short-circuit AND / OR, unary NOT |
 
 See `examples/features/` for runnable demonstrations.
 
@@ -265,6 +266,22 @@ Recent improvements:
 * Partial application generalized to constructors.
 * Nested constructor patterns (example: `nested_patterns.tong`).
 * Implicit last-expression return in function bodies (you can omit `return` for final expression).
+* Short-circuit logical operators `&`, `||`, and unary `!`.
+* Array element update sugar `arr[i] = expr` (immutably rebuilds array with updated slot).
+
+### Operator Precedence (Highest → Lowest)
+
+1. Indexing / Call / Property (postfix)
+2. Unary: `-`, `+`, `!`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Comparison: `<`, `<=`, `>`, `>=`
+6. Equality: `==`, `!=`
+7. Conjunction: `&`
+8. Disjunction: `||`
+9. (Assignments are statement-level only: `let x =`, `x =`, `arr[i] =`)
+
+All binary operators are left-associative. Parentheses may be used to override default grouping.
 * Short-circuit logical operators `&` (AND), `||` (OR) and unary `!` (NOT).
 * Array element update sugar: `arr[i] = expr` (clones + updates underlying array immutably).
 

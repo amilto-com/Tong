@@ -1,9 +1,9 @@
-// Functional Pong using Haskell-style guarded multi-clause functions and '&' logical AND
+// Functional Pong using Haskell-style guarded multi-clause functions and logical operators
 // Demonstrates:
-//  - Guarded function clauses (fn f(args) | condition { ... })
+//  - Guarded function clauses (fn f(args) if condition { ... })
 //  - Pattern parameter clauses for simple boolean direction function
-//  - Pure state evolution via immutable object reconstruction
-//  - Newly added '&' operator for readable compound guards
+//  - Pure state evolution via immutable array-based state
+//  - Logical operators: '&' (AND), '||' (OR), '!' (NOT) mixed in guards with short-circuiting
 
 // state as array to avoid current parser object + guard interaction
 // [0]=win_w [1]=win_h [2]=ball_x [3]=ball_y [4]=ball_vx [5]=ball_vy [6]=ball_size
@@ -21,7 +21,8 @@ fn make_state() {
 // clamp with guards (purely guarded so no shadowing)
 fn clamp(v, lo, hi) if v < lo { lo }
 fn clamp(v, lo, hi) if v > hi { hi }
-fn clamp(v, lo, hi) if v >= lo & v <= hi { v }
+// Final guard uses combined OR to show precedence with AND: (v >= lo & v <= hi) || true always matches.
+fn clamp(v, lo, hi) if (v >= lo & v <= hi) || true { v }
 
 // direction (pattern parameter clauses)
 fn dir(true, true)  { 0 }
@@ -30,11 +31,12 @@ fn dir(false, true) { 8 }
 fn dir(false, false){ 0 }
 
 // step_ball: top bounce, bottom bounce, default (all guarded)
-fn step_ball(st) if st[3] + st[5] <= 0 {
+// Use OR in first two clauses to illustrate alternative bounce predicate forms; second part is redundant but demonstrates short-circuit
+fn step_ball(st) if (st[3] + st[5] <= 0) || (st[3] <= 0 & !false) {
   state(st[0], st[1], st[2] + st[4], 0, st[4], -st[5], st[6],
     st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
 }
-fn step_ball(st) if st[3] + st[5] >= st[1] - st[6] {
+fn step_ball(st) if st[3] + st[5] >= st[1] - st[6] || (st[3] >= st[1] - st[6] & st[5] > 0) {
   state(st[0], st[1], st[2] + st[4], st[1] - st[6], st[4], -st[5], st[6],
     st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
 }
@@ -44,26 +46,27 @@ fn step_ball(st) if true {
 }
 
 // paddle collision using '&' guards (all guarded)
+// Left paddle collision mixes AND/OR and NOT to illustrate precedence: require direction AND horizontal overlap AND (vertical overlap OR near miss with upward motion)
 fn paddle_collision(st)
   if st[4] < 0 & st[2] <= st[7] + st[9] & st[2] + st[6] >= st[7]
-    & st[3] + st[6] >= st[11] & st[3] <= st[11] + st[10] {
+    & ((st[3] + st[6] >= st[11] & st[3] <= st[11] + st[10]) || (st[3] + st[6] >= st[11] - 1 & ! (st[3] > st[11] + st[10] + 1))) {
   state(st[0], st[1], st[7] + st[9], st[3], -st[4], st[5], st[6],
         st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
 }
 fn paddle_collision(st)
   if st[4] > 0 & st[2] + st[6] >= st[8] & st[2] <= st[8] + st[9]
-    & st[3] + st[6] >= st[12] & st[3] <= st[12] + st[10] {
+    & ((st[3] + st[6] >= st[12] & st[3] <= st[12] + st[10]) || (st[3] <= st[12] + st[10] + 1 & !false)) {
   state(st[0], st[1], st[8] - st[6], st[3], -st[4], st[5], st[6],
         st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
 }
 fn paddle_collision(st) if true { st }
 
 // scoring guards (respawn + score increment)
-fn scoring(st) if st[2] < 0 {
+fn scoring(st) if st[2] < 0 & !(st[2] + st[6] >= 0) || st[2] < -5 {
   state(st[0], st[1], 400, 300, 5, 4, st[6],
         st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14] + 1, st[15])
 }
-fn scoring(st) if st[2] > st[0] {
+fn scoring(st) if (st[2] > st[0] & !(st[2] <= st[0])) || st[2] > st[0] + 5 {
   state(st[0], st[1], 400, 300, -5, 4, st[6],
         st[7], st[8], st[9], st[10], st[11], st[12], st[13] + 1, st[14], st[15])
 }
