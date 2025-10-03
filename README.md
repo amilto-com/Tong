@@ -462,6 +462,38 @@ Typical workflow:
 
 No contribution is too small — even typo fixes are appreciated. If you’re unsure where to start, open a GitHub Discussion or Issue and say hello.
 
+## Example Output Regression Harness
+
+All example programs under `examples/` are treated as golden tests. Their expected outputs (including warning lines) live in `examples/expected/` with the same relative path and a `.out` extension. The harness ensures language/runtime changes don’t silently alter behavior.
+
+Updating / generating snapshots:
+
+```bash
+bash scripts/gen_expected.sh   # regenerate every expected .out (non-SDL examples)
+```
+
+Running the regression check locally (fails on any diff):
+
+```bash
+bash scripts/check_examples.sh
+```
+
+Typical workflow when you intentionally change observable behavior:
+1. Modify runtime / parser / examples.
+2. Run `bash scripts/check_examples.sh` – observe failing diffs.
+3. If the changes are correct, regenerate snapshots with `bash scripts/gen_expected.sh`.
+4. Re-run the checker; commit both code and updated `.out` files.
+
+Notes:
+- SDL examples are skipped (they are interactive / feature-gated).
+- Warning lines beginning with `[TONG][warn]` are asserted; changing diagnostic wording requires snapshot updates.
+- CI runs the harness on every push & PR; mismatches fail the build.
+
+Future enhancements (planned):
+- Selective update mode (`UPDATE=1 bash scripts/check_examples.sh`).
+- Output normalization flags (e.g. to ignore timestamps if added later).
+
+
 ## Contributing
 
 TONG is designed to be the ultimate programming language. Contributions are welcome!

@@ -39,23 +39,15 @@ for f in "${FILES[@]}"; do
      rm -f "$tmp_out"
      continue
   fi
-  # Normalize by stripping runtime warning lines to allow optional warnings.
-  norm_actual="$(mktemp)"; norm_expected="$(mktemp)"
-  grep -v '^\[TONG\]\[warn\]' "$tmp_out" > "$norm_actual" || true
-  grep -v '^\[TONG\]\[warn\]' "$expected" > "$norm_expected" || true
-  if diff -u --strip-trailing-cr "$norm_expected" "$norm_actual" > /dev/null; then
-  echo "[PASS] $rel"
-  (( ++PASS ))
-  else
-   echo "[DIFF] $rel" >&2
-   echo '--- Raw diff including warnings (expected vs actual) ---' >&2
-   diff -u --strip-trailing-cr "$expected" "$tmp_out" || true
-   echo '--- Normalized diff (warnings stripped) ---' >&2
-   diff -u --strip-trailing-cr "$norm_expected" "$norm_actual" || true
-   FAIL=1
-  fi
+    if diff -u --strip-trailing-cr "$expected" "$tmp_out" > /dev/null; then
+      echo "[PASS] $rel"
+      (( ++PASS ))
+    else
+      echo "[DIFF] $rel" >&2
+      diff -u --strip-trailing-cr "$expected" "$tmp_out" || true
+      FAIL=1
+    fi
   rm -f "$tmp_out"
-  rm -f "$norm_actual" "$norm_expected"
 done
 
 echo "== Summary =="

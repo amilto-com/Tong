@@ -49,7 +49,9 @@ htmlcov/
 .ipynb_checkpoints
 
 # Generated files
+# Keep generic .out ignored, but allow committed golden snapshots under examples/expected
 *.out
+!examples/expected/**/*.out
 *.exe
 *.wasm
 *.bc

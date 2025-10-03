@@ -36,3 +36,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo build --all-targets --release
+
+      - name: Example regression harness
+        run: |
+          bash scripts/check_examples.sh
