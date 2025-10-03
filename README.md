@@ -307,6 +307,29 @@ Rules:
 
 Array update sugar (`arr[i] = expr`) is statement-level and distinct from expression indexing: it produces an updated array value immutably (clones underlying vector and writes the slot).
 
+### Anonymous Function Syntax Summary
+
+Three equivalent anonymous function literal forms are currently supported (all produce a first-class function value and support partial application):
+
+| Form | Example | Arity inference | Notes |
+|------|---------|-----------------|-------|
+| Pipe single-param | `let inc = |x| x + 1` | 1 param | Shorthand for a single argument; body is expression following `|param|`. |
+| Backslash multi-param | `let add = \a b -> a + b` | Count identifiers before `->` | Multiple params separated by spaces; right side is a single expression. |
+| `fn` with block | `let f = fn a b { let c = a + b; c * 2 }` | Count identifiers before `{` | Full block body: any number of statements; last bare expression is return value. |
+
+All forms support partial application (currying) when invoked with fewer arguments than declared.
+Examples:
+```tong
+let add3 = \a b c -> a + b + c
+let add1 = add3(1)       // <partial:add3:1>
+let add1_2 = add1(2)     // <partial:add3:2>
+print(add1_2(7))         // 10
+
+let scale_then = fn factor { fn x { x * factor } }
+let double = scale_then(2)
+print(double(21))        // 42
+```
+
 ### Operator Precedence (Highest → Lowest)
 
 1. Indexing / Call / Property (postfix)
