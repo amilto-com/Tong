@@ -1,0 +1,7 @@
+# Enforce LF for source, scripts, and snapshot outputs
+*.rs text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.tong text eol=lf
+examples/expected/*.out text eol=lf
