@@ -1,6 +1,4 @@
-#[cfg(feature = "sdl3")]
-use anyhow::anyhow; // anyhow! macro for SDL code paths
-use anyhow::{bail, Result, anyhow};
+use anyhow::{anyhow, bail, Result}; // anyhow! macro and helpers
 use std::collections::HashMap;
 #[cfg(feature = "sdl3")]
 use std::time::Duration; // Duration used in sdl_delay
@@ -1262,8 +1260,8 @@ impl Env {
             .pattern_funcs
             .get(&name)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!(format!("unknown pattern function {name}")))?;
-        for (patterns, guard, body) in clauses {
+            .ok_or_else(|| anyhow!(format!("unknown pattern function {name}")))?;
+        for (patterns, guard, body) in clauses.into_iter() {
             if patterns.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
@@ -1297,8 +1295,8 @@ impl Env {
             .guarded_funcs
             .get(&name)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!(format!("unknown guarded function {name}")))?;
-        for (params, guard_expr, body) in clauses {
+            .ok_or_else(|| anyhow!(format!("unknown guarded function {name}")))?;
+        for (params, guard_expr, body) in clauses.into_iter() {
             if params.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
