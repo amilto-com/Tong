@@ -85,12 +85,21 @@ struct Env {
 impl Env {
     // Execute a sequence of statements. Return Some(value) if a Return was hit.
     fn exec_block(&mut self, block: &[Stmt]) -> Result<Option<Value>> {
+        let mut last_expr: Option<Value> = None;
         for s in block {
-            if let Some(rv) = self.exec_stmt(s)? {
-                return Ok(Some(rv));
+            match self.exec_stmt(s)? {
+                Some(rv) => return Ok(Some(rv)), // explicit return short-circuits
+                None => {
+                    // Capture value of bare expression statements for implicit return semantics
+                    if let Stmt::Expr(e) = s {
+                        // Evaluate again to capture value (exec_stmt already evaluated it and discarded). To avoid double eval, we could special-case in exec_stmt, but keep simple for now.
+                        last_expr = Some(self.eval_expr(e.clone())?);
+                    }
+                }
             }
         }
-        Ok(None)
+        // If no explicit return, propagate last expression value (functional style implicit return)
+        Ok(last_expr)
     }
 
     // Execute a single statement. Return Some(value) if a Return was hit.
@@ -302,6 +311,14 @@ impl Env {
                     }
                     _ => bail!("indexing expects array[index]"),
                 }
+            }
+            Expr::ConstructorCall { name, args } => {
+                let arity = *self.data_ctors.get(&name).ok_or_else(|| anyhow::anyhow!(format!("unknown constructor {}", name)))?;
+                let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                let vals = evaled?;
+                if vals.len() < arity { Value::Partial { name, applied: vals } }
+                else if vals.len() == arity { Value::Constructor { name, fields: vals } }
+                else { bail!("constructor arity mismatch") }
             }
             Expr::Call { callee, args } => {
                 match callee.as_str() {

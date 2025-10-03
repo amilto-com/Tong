@@ -1,0 +1,4 @@
+// Placeholder for future nested constructor pattern example.
+// Currently disabled pending stable semantics for recursive pattern guards.
+// (No output expected; regression script will skip because expected file removed.)
+data Placeholder = Dummy

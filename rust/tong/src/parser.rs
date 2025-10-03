@@ -19,6 +19,10 @@ pub enum Expr {
         callee: String,
         args: Vec<Expr>,
     },
+    ConstructorCall {
+        name: String,
+        args: Vec<Expr>,
+    },
     MethodCall {
         target: Box<Expr>,
         method: String,
@@ -558,6 +562,9 @@ impl Parser {
             let mut node = Expr::Ident(self.bump().unwrap().text);
             // function call on identifier
             if self.peek_is(TokenKind::LParen) {
+                // Distinguish constructor vs function by initial uppercase letter of ident
+                let name = match &node { Expr::Ident(n) => n.clone(), _ => String::new() };
+                let is_ctor_like = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
                 self.eat(TokenKind::LParen)?;
                 let mut args = Vec::new();
                 if !self.peek_is(TokenKind::RParen) {
@@ -568,13 +575,11 @@ impl Parser {
                     }
                 }
                 self.eat(TokenKind::RParen)?;
-                node = Expr::Call {
-                    callee: match node {
-                        Expr::Ident(n) => n,
-                        _ => unreachable!(),
-                    },
-                    args,
-                };
+                if is_ctor_like {
+                    node = Expr::ConstructorCall { name, args };
+                } else {
+                    node = Expr::Call { callee: name, args };
+                }
             }
             // property/method chaining: .name or .method(args)
             while self.peek_is(TokenKind::Dot) {
@@ -634,15 +639,35 @@ impl Parser {
             if name == "_" { return Ok(Pattern::Wildcard); }
             let is_ctor = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
             if is_ctor {
-                // Parse following identifier patterns as constructor arguments (no nesting beyond simple idents for MVP)
+                // Parenthesized constructor pattern arguments: Ctor(p1, p2, ...)
+                if self.peek_is(TokenKind::LParen) {
+                    self.eat(TokenKind::LParen)?;
+                    let mut subs = Vec::new();
+                    if !self.peek_is(TokenKind::RParen) {
+                        subs.push(self.parse_pattern()?);
+                        while self.peek_is(TokenKind::Comma) { self.bump(); subs.push(self.parse_pattern()?); }
+                    }
+                    self.eat(TokenKind::RParen)?;
+                    return Ok(Pattern::Constructor { name, arity: subs.len(), sub: subs });
+                }
+                // Fallback: space-separated simple subpatterns (kept for backward compatibility: Just x, Node left right)
                 let mut subs = Vec::new();
-                while self.peek_is(TokenKind::Ident) {
-                    if self.peek_text() == "->" { break; }
-                    let next = self.peek_text();
-                    if !next.is_empty() && next.chars().next().unwrap().is_uppercase() { break; }
-                    // treat identifier '_' as wildcard
-                    let arg_name = self.eat_ident()?;
-                    if arg_name == "_" { subs.push(Pattern::Wildcard); } else { subs.push(Pattern::Ident(arg_name)); }
+                loop {
+                    if self.peek_is(TokenKind::Arrow)
+                        || self.peek_is(TokenKind::Comma)
+                        || self.peek_is(TokenKind::If)
+                        || self.peek_is(TokenKind::Pipe)
+                        || self.peek_is(TokenKind::RBrace)
+                        || self.peek_is(TokenKind::RParen) {
+                        break; }
+                    let starts = self.peek_is(TokenKind::Ident)
+                        || self.peek_is(TokenKind::Int)
+                        || self.peek_is(TokenKind::True)
+                        || self.peek_is(TokenKind::False)
+                        || self.peek_is(TokenKind::LParen);
+                    if !starts { break; }
+                    if self.peek_is(TokenKind::Ident) && self.peek_text()=="_" { self.bump(); subs.push(Pattern::Wildcard); }
+                    else { subs.push(self.parse_pattern()?); }
                 }
                 return Ok(Pattern::Constructor { name, arity: subs.len(), sub: subs });
             }
