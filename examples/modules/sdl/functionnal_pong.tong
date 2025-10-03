@@ -41,9 +41,12 @@ fn clamp(v, lo, hi) { if v < lo { lo } else { if v > hi { hi } else { v } } }
 
 // Reset ball centered with specified vx sign (+/-)
 fn reset_ball(state, vx_sign) {
+  // Avoid division (which may promote to float) to keep coordinates as ints
+  let mid_x = 400  // width()/2
+  let mid_y = 300  // height()/2
   let vx = init_ball_vx() * vx_sign
   let vy = init_ball_vy()
-  Game(width()/2, height()/2, vx, vy, p1y(state), p2y(state), s1(state), s2(state), is_running(state))
+  Game(mid_x, mid_y, vx, vy, p1y(state), p2y(state), s1(state), s2(state), is_running(state))
 }
 
 // Pattern clause accessors for readability (since we used positional constructor)
@@ -221,7 +224,10 @@ fn main() {
   print("Functional Pong controls: W/S vs Up/Down, ESC or Q to quit")
 
   // Initial state
-  let state = Game(width()/2, height()/2, init_ball_vx(), init_ball_vy(), (height()-paddle_h())/2, (height()-paddle_h())/2, 0, 0, true)
+  let mid_x = 400
+  let mid_y = 300
+  let start_paddle_y = 260  // (600 - 80)/2
+  let state = Game(mid_x, mid_y, init_ball_vx(), init_ball_vy(), start_paddle_y, start_paddle_y, 0, 0, true)
 
   let running = true
   while running {
