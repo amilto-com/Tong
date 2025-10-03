@@ -25,11 +25,14 @@ pub fn builtin_functions() -> Vec<&'static str> {
     v
 }
 
-pub fn execute(program: Program) -> Result<()> {
+pub fn execute(program: Program, debug: bool) -> Result<()> {
     let mut env = Env::new();
+    env.debug = debug;
+    if env.debug { eprintln!("[TONG][dbg] start: {} top-level statements", program.stmts.len()); }
 
     // First collect function definitions
-    for stmt in &program.stmts {
+    for (i, stmt) in program.stmts.iter().enumerate() {
+        if env.debug { eprintln!("[TONG][dbg] top-level stmt #{}", i); }
         match stmt {
             Stmt::FnDef(name, params, body) => {
                 env.funcs
@@ -221,6 +224,7 @@ struct Env {
     data_ctors: HashMap<String, usize>,       // ctor name -> arity
     type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
     ctor_type: HashMap<String, String>,       // ctor name -> type name
+    debug: bool,
 }
 
 impl Env {
@@ -337,11 +341,10 @@ impl Env {
             Stmt::While(cond, body) => {
                 loop {
                     let v = self.eval_expr(cond.clone())?;
-                    if !matches!(v, Value::Bool(true)) {
-                        break;
-                    }
-                    if let Some(rv) = self.exec_block(body)? {
-                        return Ok(Some(rv));
+                    if !matches!(v, Value::Bool(true)) { break; }
+                    // Execute statements but ignore implicit last expression value to prevent accidental loop termination
+                    for s in body {
+                        if let Some(rv) = self.exec_stmt(s)? { return Ok(Some(rv)); }
                     }
                 }
                 Ok(None)
@@ -370,6 +373,7 @@ impl Env {
             data_ctors: HashMap::new(),
             type_ctors: HashMap::new(),
             ctor_type: HashMap::new(),
+            debug: false,
         }
     }
     fn vars(&self) -> &HashMap<String, Value> {
@@ -1515,25 +1519,12 @@ impl Env {
                 "sdl_present" => Ok(Value::Int(0)),
                 "sdl_delay" => {
                     // Simulate ~60 FPS by increasing frame count; no sleeping for CI speed
-                    let _ = args; // ignore actual ms arg in headless mode
+                    let _ = args; // ignore actual ms
                     self.sdl_frame += 1;
-                    // Optional sleep to make headless demo observable: set TONG_HEADLESS_DELAY_MS
-                    if let Ok(ms_str) = std::env::var("TONG_HEADLESS_DELAY_MS") {
-                        if let Ok(ms) = ms_str.parse::<u64>() { std::thread::sleep(std::time::Duration::from_millis(ms)); }
-                    }
                     Ok(Value::Int(0))
                 }
                 "sdl_poll_quit" => {
-                    // Allow disabling auto-quit for interactive headless debugging.
-                    if std::env::var("TONG_HEADLESS_NO_AUTOQUIT").is_ok() {
-                        return Ok(Value::Bool(false));
-                    }
-                    // Configurable max frame count (default 300). After this we report quit=true so loops exit.
-                    let max_frames: i64 = std::env::var("TONG_HEADLESS_MAX_FRAMES")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(300);
-                    let quit = self.sdl_frame >= max_frames;
+                    let quit = self.sdl_frame >= 300; // auto-quit after ~300 frames
                     Ok(Value::Bool(quit))
                 }
                 "sdl_key_down" => Ok(Value::Bool(false)),

@@ -24,6 +24,12 @@ struct Cli {
     /// List core built-in functions and exit
     #[arg(long)]
     list_builtins: bool,
+    /// Enable verbose runtime debug tracing (statement exec, function calls, SDL events)
+    #[arg(short, long)]
+    debug: bool,
+    /// Print explicit exit status line on completion
+    #[arg(long)]
+    show_exit: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -56,10 +62,24 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(file) = cli.file {
-        let src = fs::read_to_string(&file)?;
-        let tokens = lexer::lex(&src)?;
-        let program = parser::parse(tokens)?;
-        runtime::execute(program)?;
+        let result = (|| -> anyhow::Result<()> {
+            let src = fs::read_to_string(&file)?;
+            let tokens = lexer::lex(&src)?;
+            let program = parser::parse(tokens)?;
+            runtime::execute(program, cli.debug)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                if cli.debug || cli.show_exit {
+                    eprintln!("[TONG][exit] success");
+                }
+            }
+            Err(e) => {
+                eprintln!("[TONG][exit][error] {}", e);
+                std::process::exit(1);
+            }
+        }
     } else {
         // Interactive REPL
         println!("TONG REPL - type :help for commands, :quit to exit");

@@ -83,6 +83,28 @@ pub enum Stmt {
     DataDecl(String, Vec<Constructor>),
 }
 
+impl Stmt {
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Stmt::Let(..) => "Let",
+            Stmt::LetTuple(..) => "LetTuple",
+            Stmt::Assign(..) => "Assign",
+            Stmt::Print(..) => "Print",
+            Stmt::FnMain(..) => "FnMain",
+            Stmt::FnDef(..) => "FnDef",
+            Stmt::FnDefGuarded(..) => "FnDefGuarded",
+            Stmt::FnDefPattern(..) => "FnDefPattern",
+            Stmt::Import(..) => "Import",
+            Stmt::Return(..) => "Return",
+            Stmt::If(..) => "If",
+            Stmt::While(..) => "While",
+            Stmt::Parallel(..) => "Parallel",
+            Stmt::Expr(..) => "Expr",
+            Stmt::DataDecl(..) => "DataDecl",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Constructor {
     pub name: String,
