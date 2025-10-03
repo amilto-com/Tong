@@ -876,6 +876,23 @@ impl Env {
                 eval_gens(self, &generators, 0, &elem, &pred, &mut out)?;
                 Value::Array(out)
             }
+            Expr::Block(stmts) => {
+                self.vars_stack.push(HashMap::new());
+                let mut last: Option<Value> = None;
+                for s in stmts {
+                    match self.exec_stmt(&s)? {
+                        Some(rv) => { last = Some(rv); break; }
+                        None => {
+                            if let Stmt::Expr(e) = s.clone() {
+                                // capture expression value
+                                last = Some(self.eval_expr(e)?);
+                            }
+                        }
+                    }
+                }
+                self.vars_stack.pop();
+                last.unwrap_or(Value::Array(vec![]))
+            }
             Expr::Match { scrutinee, arms } => {
                 // Run redundancy analysis before executing match
                 self.check_match_redundancy(&arms);
@@ -1909,15 +1926,40 @@ impl Repl {
 
         // First collect function/main definitions without clearing existing ones
         for stmt in &program.stmts {
-            if let Stmt::FnDef(name, params, body) = stmt {
-                self.env
-                    .funcs
-                    .insert(name.clone(), (params.clone(), body.clone()));
-            }
-            if let Stmt::FnMain(body) = stmt {
-                self.env
-                    .funcs
-                    .insert("main".to_string(), (Vec::new(), body.clone()));
+            match stmt {
+                Stmt::FnDef(name, params, body) => {
+                    // Plain function: overwrite previous definition
+                    self.env
+                        .funcs
+                        .insert(name.clone(), (params.clone(), body.clone()));
+                }
+                Stmt::FnDefGuarded(name, params, guard, body) => {
+                    // Append guarded clause to existing set (REPL allows incremental clause authoring)
+                    self.env
+                        .guarded_funcs
+                        .entry(name.clone())
+                        .or_default()
+                        .push((params.clone(), guard.clone(), body.clone()));
+                }
+                Stmt::FnDefPattern(name, patterns, guard, body) => {
+                    // Append pattern clause maintaining order of entry across snippets
+                    self.env
+                        .pattern_funcs
+                        .entry(name.clone())
+                        .or_default()
+                        .push((patterns.clone(), guard.clone(), body.clone()));
+                }
+                Stmt::FnMain(body) => {
+                    self.env
+                        .funcs
+                        .insert("main".to_string(), (Vec::new(), body.clone()));
+                }
+                Stmt::DataDecl(_tname, ctors) => {
+                    for c in ctors {
+                        self.env.data_ctors.insert(c.name.clone(), c.arity);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -1958,7 +2000,11 @@ impl Repl {
                             let _ = self.env.exec_stmt(stmt)?;
                             last_expr = None;
                         }
-                        Stmt::FnDef(..) | Stmt::FnMain(..) => {}
+                        Stmt::FnDef(..)
+                        | Stmt::FnDefGuarded(..)
+                        | Stmt::FnDefPattern(..)
+                        | Stmt::FnMain(..)
+                        | Stmt::DataDecl(..) => {}
                         _ => {}
                     }
                 }

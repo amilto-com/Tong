@@ -1,0 +1,42 @@
+warning: variants `Index` and `Block` are never constructed
+  --> src/parser.rs:39:5
+   |
+ 6 | pub enum Expr {
+   |          ---- variants in this enum
+...
+39 |     Index(Box<Expr>, Box<Expr>),
+   |     ^^^^^
+...
+51 |     Block(Vec<Stmt>), // block expression used for anonymous fn bodies / explicit blocks
+   |     ^^^^^
+   |
+   = note: `Expr` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+TONG REPL - type :help for commands, :quit to exit
+tong> tong> tong> sum 42
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> tong> Error: unknown function fromMaybe
+tong> Error: unknown function fromMaybe
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> Error: unknown function fact
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> inc41 42
+tong> sq7 49
+tong> tong> add2_3 5
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> squares [1, 4, 9, 16, 25]
+tong> Error: expected RParen at line 1, col 20
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> Error: expected RParen at line 1, col 27
+tong> [0]
+tong> Error: undefined variable short1
+tong> Error: expected RParen at line 1, col 27
+tong> Error: expected RParen at line 1, col 29
+tong> tong> logicMix true
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> Error: unsupported operands for operation: (Array([Int(1)]), Int(10))
+tong> Error: expected RParen at line 1, col 17
+tong> tong> Error: lex error at 2:1 near '#'
+tong> Error: unknown constructor Just
+tong> tong> 

@@ -4,3 +4,11 @@ let inc1 = |x| x + 1
 let inc2 = \x -> x + 1
 print(inc1(10))
 print(inc2(10))
+
+// Anonymous fn with multi-statement block body
+let addMul = fn a b {
+	let s = a + b
+	let p = a * b
+	s + p  // last expr
+}
+print(addMul(3,4))

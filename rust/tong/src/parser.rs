@@ -48,6 +48,7 @@ pub enum Expr {
         generators: Vec<(String, Expr)>, // (var, list_expr) pairs, evaluated left-to-right
         pred: Option<Box<Expr>>,         // optional predicate applied after all bindings
     },
+    Block(Vec<Stmt>), // block expression used for anonymous fn bodies / explicit blocks
 }
 
 #[derive(Debug, Clone)]
@@ -314,23 +315,17 @@ impl Parser {
                 bail!("expected '=' after type name in data declaration");
             }
             self.eat(TokenKind::Equal)?;
-            // constructors separated by '|', each name optionally followed by arity counted via Ident placeholders (simplified)
             let mut ctors = Vec::new();
             loop {
                 let cname = self.eat_ident()?;
-                // Count following Ident parameters until '|' or end-of-stmt token (reuse Else/While/Fn/Let/Var/If/Data/Return/Parallel as boundaries or EOF)
                 let mut arity = 0usize;
                 while self.peek_is(TokenKind::Ident) {
-                    // lookahead stop if next is '=' which would start assignment, but for simplicity treat consecutive identifiers as params
                     arity += 1;
                     self.bump();
                 }
                 self.known_ctors.insert(cname.clone(), arity);
                 ctors.push(Constructor { name: cname, arity });
-                if self.peek_is(TokenKind::Pipe) {
-                    self.bump();
-                    continue;
-                }
+                if self.peek_is(TokenKind::Pipe) { self.bump(); continue; }
                 break;
             }
             return Ok(Stmt::DataDecl(type_name, ctors));
@@ -481,7 +476,6 @@ impl Parser {
         Ok(node)
     }
 
-    // conjunction precedence below comparison, above equality currently (we thread by calling comparison inside)
     fn parse_conjunction(&mut self) -> Result<Expr> {
         let mut node = self.parse_comparison()?;
         while self.peek_is(TokenKind::Ampersand) {
@@ -635,10 +629,33 @@ impl Parser {
             self.bump();
             return self.parse_unary();
         }
-        self.parse_primary()
+        self.parse_atom()
     }
 
     fn parse_atom(&mut self) -> Result<Expr> {
+        // Anonymous function expression: fn a b c { ... }
+        if self.peek_is(TokenKind::Fn) {
+            // Look ahead: if next non-whitespace tokens match pattern fn Ident* { then treat as anonymous lambda
+            self.bump(); // consume 'fn'
+            let mut params = Vec::new();
+            while self.peek_is(TokenKind::Ident) {
+                // Stop before '{'
+                if self.peek_n_is(0, TokenKind::LBrace) { break; }
+                params.push(self.eat_ident()?);
+                // If next token is '{' break to parse body
+                if self.peek_is(TokenKind::LBrace) { break; }
+            }
+            self.eat(TokenKind::LBrace)?;
+            // Parse block as a sequence of statements; last expression (if any) acts as implicit return.
+            let mut body_stmts = Vec::new();
+            while !self.peek_is(TokenKind::RBrace) {
+                body_stmts.push(self.parse_stmt()?);
+            }
+            self.eat(TokenKind::RBrace)?;
+            // Preserve full block semantics via an explicit Block expression (now actually constructing Expr::Block).
+            let lambda_body = Expr::Block(body_stmts);
+            return Ok(Expr::Lambda { params, body: Box::new(lambda_body) });
+        }
         // Backslash lambda: \x y -> expr
         if self.peek_is(TokenKind::Backslash) {
             self.bump();
@@ -668,7 +685,81 @@ impl Parser {
             self.eat(TokenKind::LParen)?;
             let e = self.parse_expr()?;
             self.eat(TokenKind::RParen)?;
-            return Ok(e);
+            // Allow postfix operations (indexing / property) after parenthesized expressions
+            let mut node = e;
+            loop {
+                if self.peek_is(TokenKind::LBracket) {
+                    self.eat(TokenKind::LBracket)?;
+                    let idx_expr = self.parse_expr()?;
+                    self.eat(TokenKind::RBracket)?;
+                    node = Expr::Index(Box::new(node), Box::new(idx_expr));
+                    continue;
+                }
+                if self.peek_is(TokenKind::Dot) {
+                    self.eat(TokenKind::Dot)?;
+                    let name = self.eat_ident()?;
+                    if self.peek_is(TokenKind::LParen) {
+                        self.eat(TokenKind::LParen)?;
+                        let mut args = Vec::new();
+                        if !self.peek_is(TokenKind::RParen) {
+                            args.push(self.parse_expr()?);
+                            while self.peek_is(TokenKind::Comma) {
+                                self.bump();
+                                args.push(self.parse_expr()?);
+                            }
+                        }
+                        self.eat(TokenKind::RParen)?;
+                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                    } else {
+                        node = Expr::Property { target: Box::new(node), name };
+                    }
+                    continue;
+                }
+                break;
+            }
+            return Ok(node);
+        }
+        // Explicit block expression: { stmt* } returns last expression value if present (constructed as Expr::Block)
+        if self.peek_is(TokenKind::LBrace) {
+            self.eat(TokenKind::LBrace)?;
+            let mut stmts = Vec::new();
+            while !self.peek_is(TokenKind::RBrace) {
+                stmts.push(self.parse_stmt()?);
+            }
+            self.eat(TokenKind::RBrace)?;
+            let mut node = Expr::Block(stmts);
+            // Allow chaining of indexing / property after a block expression
+            loop {
+                if self.peek_is(TokenKind::LBracket) {
+                    self.eat(TokenKind::LBracket)?;
+                    let idx_expr = self.parse_expr()?;
+                    self.eat(TokenKind::RBracket)?;
+                    node = Expr::Index(Box::new(node), Box::new(idx_expr));
+                    continue;
+                }
+                if self.peek_is(TokenKind::Dot) {
+                    self.eat(TokenKind::Dot)?;
+                    let name = self.eat_ident()?;
+                    if self.peek_is(TokenKind::LParen) {
+                        self.eat(TokenKind::LParen)?;
+                        let mut args = Vec::new();
+                        if !self.peek_is(TokenKind::RParen) {
+                            args.push(self.parse_expr()?);
+                            while self.peek_is(TokenKind::Comma) {
+                                self.bump();
+                                args.push(self.parse_expr()?);
+                            }
+                        }
+                        self.eat(TokenKind::RParen)?;
+                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                    } else {
+                        node = Expr::Property { target: Box::new(node), name };
+                    }
+                    continue;
+                }
+                break;
+            }
+            return Ok(node);
         }
         if self.peek_is(TokenKind::Match) {
             self.bump();
@@ -800,32 +891,36 @@ impl Parser {
                     node = Expr::Call { callee: name, args };
                 }
             }
-            // property/method chaining: .name or .method(args)
-            while self.peek_is(TokenKind::Dot) {
-                self.eat(TokenKind::Dot)?;
-                let name = self.eat_ident()?;
-                if self.peek_is(TokenKind::LParen) {
-                    self.eat(TokenKind::LParen)?;
-                    let mut args = Vec::new();
-                    if !self.peek_is(TokenKind::RParen) {
-                        args.push(self.parse_expr()?);
-                        while self.peek_is(TokenKind::Comma) {
-                            self.bump();
-                            args.push(self.parse_expr()?);
-                        }
-                    }
-                    self.eat(TokenKind::RParen)?;
-                    node = Expr::MethodCall {
-                        target: Box::new(node),
-                        method: name,
-                        args,
-                    };
-                } else {
-                    node = Expr::Property {
-                        target: Box::new(node),
-                        name,
-                    };
+            // Postfix chaining: indexing and/or property/method access
+            loop {
+                if self.peek_is(TokenKind::LBracket) {
+                    self.eat(TokenKind::LBracket)?;
+                    let idx_expr = self.parse_expr()?;
+                    self.eat(TokenKind::RBracket)?;
+                    node = Expr::Index(Box::new(node), Box::new(idx_expr));
+                    continue;
                 }
+                if self.peek_is(TokenKind::Dot) {
+                    self.eat(TokenKind::Dot)?;
+                    let name = self.eat_ident()?;
+                    if self.peek_is(TokenKind::LParen) {
+                        self.eat(TokenKind::LParen)?;
+                        let mut args = Vec::new();
+                        if !self.peek_is(TokenKind::RParen) {
+                            args.push(self.parse_expr()?);
+                            while self.peek_is(TokenKind::Comma) {
+                                self.bump();
+                                args.push(self.parse_expr()?);
+                            }
+                        }
+                        self.eat(TokenKind::RParen)?;
+                        node = Expr::MethodCall { target: Box::new(node), method: name, args };
+                    } else {
+                        node = Expr::Property { target: Box::new(node), name };
+                    }
+                    continue;
+                }
+                break;
             }
             Ok(node)
         } else if let Some(t) = self.peek() {
@@ -841,16 +936,7 @@ impl Parser {
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr> {
-        let mut node = self.parse_atom()?;
-        while self.peek_is(TokenKind::LBracket) {
-            self.eat(TokenKind::LBracket)?;
-            let idx = self.parse_expr()?;
-            self.eat(TokenKind::RBracket)?;
-            node = Expr::Index(Box::new(node), Box::new(idx));
-        }
-        Ok(node)
-    }
+    // NOTE: parse_primary removed; parse_unary now delegates straight to parse_atom().
 
     fn parse_pattern(&mut self) -> Result<Pattern> {
         if self.peek_is(TokenKind::Ident) {
