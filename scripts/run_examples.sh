@@ -11,11 +11,13 @@ shopt -s nullglob
 
 include_modules=false
 only_rosetta=false
+skip_sdl=false
 
 for arg in "$@"; do
   case "$arg" in
-    --all) include_modules=true ;;
-    --rosetta) only_rosetta=true ;;
+  --all) include_modules=true ;;
+  --rosetta) only_rosetta=true ;;
+  --skip-sdl) skip_sdl=true ;;
     -h|--help)
       cat <<EOF
 Run TONG examples.
@@ -23,6 +25,7 @@ Run TONG examples.
 Options:
   --all        Include module examples under examples/modules/**
   --rosetta    Run only Rosetta examples (examples/rosetta/*.tong)
+  --skip-sdl   Skip examples under examples/modules/sdl (avoid window launch)
   -h, --help   Show this help
 
 Environment:
@@ -84,6 +87,10 @@ fi
 for f in "${files[@]}"; do
   rel="${f#$examples_root/}"
   echo -e "\n=== Running $rel ==="
+  if $skip_sdl && [[ "$rel" == modules/sdl/* ]]; then
+    echo "[skip] SDL example skipped due to --skip-sdl"
+    continue
+  fi
   if ! "$TONG" "$f"; then
     echo "[fail] Example failed: $rel" >&2
     exit 1

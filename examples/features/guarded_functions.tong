@@ -1,0 +1,24 @@
+// Demonstration of multi-clause guarded functions
+// Define a sign function using guarded clauses
+fn sign(x) if x > 0 {
+  print("positive")
+  return 1
+}
+fn sign(x) if x == 0 {
+  print("zero")
+  return 0
+}
+fn sign(x) if x < 0 {
+  print("negative")
+  return -1
+}
+
+print(sign(5))
+print(sign(0))
+print(sign(-7))
+
+// Factorial with guarded base case
+fn fact(n) if n == 0 { return 1 }
+fn fact(n) if n > 0 { return n * fact(n - 1) }
+
+print(fact(5))  // 120

@@ -1,89 +1,150 @@
 // SDL Pong example using TONG's module system
 
-// Draw helpers for 7-segment digits (original-style score display)
-fn draw_h(sdl, ren, x, y, w, t, r, g, b, a) { sdl.fill_rect(ren, x, y, w, t, r, g, b, a) }
-fn draw_v(sdl, ren, x, y, h, t, r, g, b, a) { sdl.fill_rect(ren, x, y, t, h, r, g, b, a) }
+// =============================
+// New scoreboard implementation (array/index-free)
+// =============================
+// Simple 3x5 block font using explicit cell draw calls (no arrays, no indexing) to stay within
+// the most basic supported language features.
 
-// Draw a single 7-segment digit at (x,y)
-// Dimensions: segment thickness t, horizontal length w, vertical height h
-fn draw_digit(sdl, ren, x, y, d, t, w, h, r, g, b, a) {
-  // Segment positions (a..g)
-  let ax = x + t
-  let ay = y
-  let bx = x + t + w
-  let by = y + t
-  let cx = x + t + w
-  let cy = y + t + h + t
-  let dx = x + t
-  let dy = y + t + h + t + h + t
-  let ex = x
-  let ey = y + t + h + t
-  let fx = x
-  let fy = y + t
-  let gx = x + t
-  let gy = y + t + h
+fn digit_width(cell) { 3*cell + 2 } // 3 columns with a 1px gap between => 2 extra pixels
 
-  // For digit 'd', draw required segments (expanded without logical OR)
-  // a: 0,2,3,5,6,7,8,9
-  if d == 0 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 2 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 3 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 5 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 6 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 7 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 8 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  if d == 9 { draw_h(sdl, ren, ax, ay, w, t, r, g, b, a) }
-  // b: 0,1,2,3,4,7,8,9
-  if d == 0 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 1 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 2 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 3 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 4 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 7 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 8 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  if d == 9 { draw_v(sdl, ren, bx, by, h, t, r, g, b, a) }
-  // c: 0,1,3,4,5,6,7,8,9
-  if d == 0 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 1 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 3 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 4 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 5 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 6 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 7 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 8 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  if d == 9 { draw_v(sdl, ren, cx, cy, h, t, r, g, b, a) }
-  // d: 0,2,3,5,6,8,9
-  if d == 0 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 2 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 3 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 5 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 6 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 8 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  if d == 9 { draw_h(sdl, ren, dx, dy, w, t, r, g, b, a) }
-  // e: 0,2,6,8
-  if d == 0 { draw_v(sdl, ren, ex, ey, h, t, r, g, b, a) }
-  if d == 2 { draw_v(sdl, ren, ex, ey, h, t, r, g, b, a) }
-  if d == 6 { draw_v(sdl, ren, ex, ey, h, t, r, g, b, a) }
-  if d == 8 { draw_v(sdl, ren, ex, ey, h, t, r, g, b, a) }
-  // f: 0,4,5,6,8,9
-  if d == 0 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  if d == 4 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  if d == 5 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  if d == 6 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  if d == 8 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  if d == 9 { draw_v(sdl, ren, fx, fy, h, t, r, g, b, a) }
-  // g: 2,3,4,5,6,8,9
-  if d == 2 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 3 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 4 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 5 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 6 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 8 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
-  if d == 9 { draw_h(sdl, ren, gx, gy, w, t, r, g, b, a) }
+fn draw_cell(sdl, ren, x, y, cell, col, row, r,g,b,a) {
+  let px = x + col * (cell + 1)
+  let py = y + row * (cell + 1)
+  sdl.fill_rect(ren, px, py, cell, cell, r,g,b,a)
 }
 
-// Draw a non-negative integer using 1-2 digits at (x,y)
-fn draw_number(sdl, ren, x, y, n, t, w, h, r, g, b, a) {
+// Draw digit d at (x,y)
+fn draw_block_digit(sdl, ren, x, y, d, cell, r,g,b,a) {
+  // Patterns defined as explicit (col,row) sets
+  if d == 0 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 1 {
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 2 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 3 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 4 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 5 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 6 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 7 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+  }
+  if d == 8 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+  if d == 9 {
+    draw_cell(sdl,ren,x,y,cell,0,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,0,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,1,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,2,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,3,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,0,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,1,4,r,g,b,a)
+    draw_cell(sdl,ren,x,y,cell,2,4,r,g,b,a)
+  }
+}
+
+fn draw_number_left(sdl, ren, x, y, n, cell, r,g,b,a) {
   let tens = 0
   let temp = n
   while temp >= 10 {
@@ -91,23 +152,21 @@ fn draw_number(sdl, ren, x, y, n, t, w, h, r, g, b, a) {
     temp = temp - 10
   }
   let ones = n % 10
-  let digit_w = w + 2*t
   if n >= 10 {
-    draw_digit(sdl, ren, x, y, tens, t, w, h, r, g, b, a)
-    draw_digit(sdl, ren, x + digit_w + t, y, ones, t, w, h, r, g, b, a)
+    draw_block_digit(sdl, ren, x, y, tens, cell, r,g,b,a)
+    let adv = digit_width(cell) + cell
+    draw_block_digit(sdl, ren, x + adv, y, ones, cell, r,g,b,a)
   } else {
-    draw_digit(sdl, ren, x, y, ones, t, w, h, r, g, b, a)
+    draw_block_digit(sdl, ren, x, y, ones, cell, r,g,b,a)
   }
 }
 
-// Draw a number whose RIGHT edge is aligned at right_x (for right-justifying left player's score)
-// Supports 1-2 digits like draw_number. If more than 2 digits occur, alignment will drift (game unlikely to reach >99).
-fn draw_number_right(sdl, ren, right_x, y, n, t, w, h, r, g, b, a) {
-  let digit_w = w + 2*t
-  let width = digit_w
-  if n >= 10 { width = digit_w + t + digit_w }
+fn draw_number_right_justified(sdl, ren, right_x, y, n, cell, r,g,b,a) {
+  let single = digit_width(cell)
+  let width = single
+  if n >= 10 { width = single + cell + single }
   let start_x = right_x - width
-  draw_number(sdl, ren, start_x, y, n, t, w, h, r, g, b, a)
+  draw_number_left(sdl, ren, start_x, y, n, cell, r,g,b,a)
 }
 
 fn main() {
@@ -118,6 +177,10 @@ fn main() {
 
   print("Controls: W/S (left paddle), UP/DOWN (right paddle), ESC/Q (quit)")
   print("Close window button should also work")
+
+  // Debug toggle (set to true to trace)
+  let debug = false
+  let frame = 0
 
   // Game state
   let ball_x = 400
@@ -136,10 +199,16 @@ fn main() {
   let score1 = 0
   let score2 = 0
 
+  // (Per-frame scoreboard constants were originally inside the loop; restoring original naming & placement)
+  // We intentionally keep them simple (t,w,h,gap,top_y) for clarity and to match pre-branch behavior.
+
   let running = true
   while running {
+    if debug { print("frame", frame, "pre loop running", running) }
     // Handle quit events - check window close button first
-    if sdl.poll_quit() {
+    let quit_evt = sdl.poll_quit()
+    if debug { print("frame", frame, "poll_quit()", quit_evt) }
+    if quit_evt {
       running = false
     }
     
@@ -278,22 +347,19 @@ fn main() {
     // Right paddle (bright magenta, brighter)
   sdl.fill_rect(ren, p2_x, p2_y, pw, ph, 255, 0, 255, 255)
     
-  // Draw scoreboard at top center in classic 7-seg style
-  let t = 6
-  let w = 36
-  let h = 54
-  let digit_w = w + 2*t
-  let gap = 20
-  let top_y = 20
-  // Right anchor for left score (so it grows to the LEFT as digits increase)
-  let left_right_anchor = 400 - gap
-  // Left anchor for right score (so it grows to the RIGHT)
-  let right_left_anchor = 400 + gap
-  draw_number_right(sdl, ren, left_right_anchor, top_y, score1, t, w, h, 255, 255, 255, 255)
-  draw_number(sdl, ren, right_left_anchor, top_y, score2, t, w, h, 255, 255, 255, 255)
+  // New scoreboard (block digits). Center separator imaginary line at x=400.
+  let cell = 14 // size of each block; tweak for aesthetics
+  let gap = 30  // distance from center for inner edges
+  let top_y = 25
+  // Left player score: right-justified against (400 - gap)
+  draw_number_right_justified(sdl, ren, 400 - gap, top_y, score1, cell, 255,255,255,255)
+  // Right player score: left-justified against (400 + gap)
+  draw_number_left(sdl, ren, 400 + gap, top_y, score2, cell, 255,255,255,255)
 
   sdl.present(ren)
     sdl.delay(16) // ~60 FPS
+    frame = frame + 1
+    if debug { print("frame", frame, "post present ball", ball_x, ball_y, "scores", score1, score2) }
   }
 
   print("Game over! Final score:", score1, "-", score2)

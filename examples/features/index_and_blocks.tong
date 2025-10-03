@@ -1,0 +1,29 @@
+// Demonstrate indexing expressions and explicit block / anonymous fn blocks
+
+let xs = [10,20,30]
+print("idx0", xs[0])
+print("idx1", xs[1])
+
+// nested indexing on an expression
+let m = [[1,2],[3,4]]
+print("m_1_0", m[1][0])
+
+// anonymous function with block body capturing local bindings
+let make = fn a b {
+  let c = a + b
+  let d = c * 2
+  d + 1  // implicit last expr value
+}
+print("make", make(2,3))
+
+// explicit block expression used inline (should yield last expression value)
+let val = {
+  let t = 5
+  let u = t * 3
+  u + 7
+}
+print("blockVal", val)
+
+// chaining after block expression
+let blockIdx = { [100,200,300] }[1]
+print("blockIdx", blockIdx)

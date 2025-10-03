@@ -1,0 +1,13 @@
+// Demonstrate partial application of multi-arg constructors
+
+data Tree = Leaf v | Node left right
+
+// Create a partial by applying only the left subtree
+let left_partial = Node(Leaf(1))         // <partial:Node:1>
+let full = left_partial(Leaf(2))         // Node(Leaf(1),Leaf(2))
+print(full)
+
+// Another example
+let p = Node(Leaf(3))
+let p2 = p(Leaf(4))
+print(p2)

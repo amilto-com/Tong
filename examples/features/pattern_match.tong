@@ -1,0 +1,9 @@
+// Pattern matching with guards
+
+data Color = Red | Green | Blue
+
+fn classify(c) { return match c { Red -> 1, Green if true -> 2, Blue -> 3 } }
+
+print(classify(Red))
+print(classify(Green))
+print(classify(Blue))

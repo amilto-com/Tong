@@ -4,12 +4,14 @@ use std::fs;
 mod lexer;
 mod parser;
 mod runtime;
-use runtime::{Repl, builtin_modules, builtin_functions};
+use runtime::{builtin_functions, builtin_modules, Repl};
 
 #[derive(Parser)]
 #[command(name = "tong")]
 #[command(version = "0.1.0")]
-#[command(about = "TONG - The Ultimate Programming Language (Rust MVP). Run with a .tong file to execute it, or with no arguments to start the interactive REPL.")]
+#[command(
+    about = "TONG - The Ultimate Programming Language (Rust MVP). Run with a .tong file to execute it, or with no arguments to start the interactive REPL."
+)]
 struct Cli {
     /// Path to a .tong source file to run (if omitted, starts interactive REPL)
     file: Option<String>,
@@ -22,6 +24,12 @@ struct Cli {
     /// List core built-in functions and exit
     #[arg(long)]
     list_builtins: bool,
+    /// Enable verbose runtime debug tracing (statement exec, function calls, SDL events)
+    #[arg(short, long)]
+    debug: bool,
+    /// Print explicit exit status line on completion
+    #[arg(long)]
+    show_exit: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -31,7 +39,13 @@ fn main() -> anyhow::Result<()> {
         let hash = option_env!("GIT_HASH").unwrap_or("unknown");
         let dirty = option_env!("GIT_DIRTY").unwrap_or("unknown");
         let ts = option_env!("BUILD_UNIX").unwrap_or("0");
-        println!("tong {} (hash:{} {} build_ts:{})", env!("CARGO_PKG_VERSION"), hash, dirty, ts);
+        println!(
+            "tong {} (hash:{} {} build_ts:{})",
+            env!("CARGO_PKG_VERSION"),
+            hash,
+            dirty,
+            ts
+        );
         return Ok(());
     }
 
@@ -48,10 +62,24 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(file) = cli.file {
-        let src = fs::read_to_string(&file)?;
-        let tokens = lexer::lex(&src)?;
-        let program = parser::parse(tokens)?;
-        runtime::execute(program)?;
+        let result = (|| -> anyhow::Result<()> {
+            let src = fs::read_to_string(&file)?;
+            let tokens = lexer::lex(&src)?;
+            let program = parser::parse(tokens)?;
+            runtime::execute(program, cli.debug)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                if cli.debug || cli.show_exit {
+                    eprintln!("[TONG][exit] success");
+                }
+            }
+            Err(e) => {
+                eprintln!("[TONG][exit][error] {}", e);
+                std::process::exit(1);
+            }
+        }
     } else {
         // Interactive REPL
         println!("TONG REPL - type :help for commands, :quit to exit");
@@ -64,9 +92,13 @@ fn main() -> anyhow::Result<()> {
             print!("{} ", prompt);
             io::stdout().flush().ok();
             let mut line = String::new();
-            if io::stdin().read_line(&mut line)? == 0 { break; }
+            if io::stdin().read_line(&mut line)? == 0 {
+                break;
+            }
             let trimmed = line.trim_end();
-            if open_braces == 0 && (trimmed.starts_with(':') || matches!(trimmed, "quit"|"q"|"exit")) {
+            if open_braces == 0
+                && (trimmed.starts_with(':') || matches!(trimmed, "quit" | "q" | "exit"))
+            {
                 match trimmed {
                     ":quit" | ":q" | ":exit" => break,
                     "quit" | "q" | "exit" => break,
@@ -74,27 +106,35 @@ fn main() -> anyhow::Result<()> {
                         println!(":quit/:q exit | :reset clear state | :env list vars | :modules list built-in modules | multi-line blocks supported (balanced {{ }})");
                     }
                     ":env" => {
-                        for (k, v) in repl.list_vars() { println!("{} = {}", k, v); }
+                        for (k, v) in repl.list_vars() {
+                            println!("{} = {}", k, v);
+                        }
                     }
                     ":modules" => {
                         let mods = builtin_modules().join(", ");
                         println!("Built-in modules: {}", mods);
                     }
-                    ":reset" => { repl.reset(); println!("(state cleared)"); }
+                    ":reset" => {
+                        repl.reset();
+                        println!("(state cleared)");
+                    }
                     other => println!("Unknown command {}", other),
                 }
                 continue;
             }
             // naive brace balance (ignore strings)
             for ch in trimmed.chars() {
-                if ch == '{' { open_braces += 1; }
-                else if ch == '}' { open_braces -= 1; }
+                if ch == '{' {
+                    open_braces += 1;
+                } else if ch == '}' {
+                    open_braces -= 1;
+                }
             }
             buffer.push_str(&line);
             if open_braces <= 0 && !buffer.trim().is_empty() {
                 match repl.eval_snippet(&buffer) {
                     Ok(Some(val)) => println!("{}", val),
-                    Ok(None) => {},
+                    Ok(None) => {}
                     Err(e) => println!("Error: {}", e),
                 }
                 buffer.clear();

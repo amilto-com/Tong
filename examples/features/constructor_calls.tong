@@ -1,0 +1,14 @@
+// Minimal constructor call + pattern matching demonstration
+
+data Pair = Mk a b
+
+let p = Mk(10, 32)
+
+fn sum_pair(pr) {
+    match pr {
+        Mk(x, y) -> x + y
+        _ -> 0
+    }
+}
+
+print(sum_pair(p))  // expect 42

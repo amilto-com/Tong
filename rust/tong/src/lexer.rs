@@ -14,6 +14,8 @@ pub enum TokenKind {
     Var,
     #[token("fn")]
     Fn,
+    #[token("def")]
+    Def,
     #[token("true")]
     True,
     #[token("false")]
@@ -28,6 +30,12 @@ pub enum TokenKind {
     While,
     #[token("parallel")]
     Parallel,
+    #[token("data")]
+    Data,
+    #[token("match")]
+    Match,
+    #[token("in")]
+    In,
     // Strings: naive double-quoted without escapes handling for MVP
     #[regex(r#""[^"\n]*""#)]
     String,
@@ -56,12 +64,22 @@ pub enum TokenKind {
     Colon,
     #[token(".")]
     Dot,
+    #[token("||")]
+    OrOr,
     #[token("|")]
     Pipe,
+    #[token("&")]
+    Ampersand,
+    #[token("->")]
+    Arrow,
+    #[token("\\")]
+    Backslash,
     #[token("==")]
     EqualEqual,
     #[token("!=")]
     BangEqual,
+    #[token("!")]
+    Bang,
     #[token("<=")]
     LessEqual,
     #[token(">=")]

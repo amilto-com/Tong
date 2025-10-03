@@ -229,6 +229,165 @@ distributed fn process_big_data(data) {
 }
 ```
 
+### Functional / Phase 1 Additions (Experimental)
+
+Early functional features inspired by Haskell (syntax may evolve):
+
+| Feature | Example | Notes |
+|---------|---------|-------|
+| Algebraic data types | `data Maybe = Nothing | Just x` | Registers constructors & arities globally |
+| Pattern matching | `match m { Just(x) -> x, Nothing -> 0 }` | Arm guards: `Just(x) if x > 0 -> x` |
+| Wildcard | `_` | Matches anything, no binding |
+| Constructor subpatterns | `Just(x)`, `Node(l,r)` | Positional only, parenthesized form preferred |
+| Nested constructor patterns | `match t { Node(Leaf(a), Leaf(b)) -> ... }` | Arbitrary nesting supported (dynamic) |
+| List comprehension | `[ x*x | x in xs if x%2==0 ]` / `[ (x,y) | x in xs, y in ys if cond ]` | Multiple generators + optional predicate |
+| Lambdas (pipe) | `|x| x + 1` | Single param shorthand |
+| Lambdas (backslash) | `\x y -> x + y` | Multi-arg, supports partials |
+| Partial application | `let add2 = add(2)` | Functions & lambdas; supports currying
+| Partial constructor application | `let left = Node(Leaf(1))` then `left(Leaf(2))` | Produces `<partial:Name:n>` until saturated |
+| Tuple destructuring | `let (a,b) = pair` | Source must be array-like same length |
+| Tuple patterns in match | `match t { (x,_,z) -> ... }` | Fixed-size array (tuple) patterns |
+| Guarded multi-clause functions | `fn fact(n) if n==0 {1}` / `fn fact(n) if n>0 { n*fact(n-1) }` | First passing guard executes |
+| Pattern clause functions (constructor patterns in params) | `def fromMaybe(Just(x)) { x } / def fromMaybe(Nothing) { 0 }` | Sugar over internal pattern match, supports guards |
+| Logical operators | `a & b`, `a || b`, `!a` | Short-circuit AND / OR, unary NOT |
+
+See `examples/features/` for runnable demonstrations.
+
+Current limitations:
+* Dynamic only (no static type checking yet).
+* No exhaustive / redundancy analysis for `match` (missing case triggers runtime error).
+* Each pattern clause supports a single guard: `def f(Just(x)) if x > 10 { ... }`.
+* Tuple patterns treat arrays as tuples; no variadic / rest patterns.
+* Error diagnostics are still minimal (work in progress).
+
+Recent improvements:
+* Multi-generator list comprehensions.
+* Parenthesized constructor calls & patterns (`Just(42)`, `Node(left,right)`).
+* Partial application generalized to constructors.
+* Nested constructor patterns (example: `nested_patterns.tong`).
+* Implicit last-expression return in function bodies (you can omit `return` for final expression).
+* Short-circuit logical operators `&`, `||`, and unary `!`.
+* Array element update sugar `arr[i] = expr` (immutably rebuilds array with updated slot).
+* Explicit block expressions `{ stmt* }` evaluate to the last expression value.
+* First-class anonymous `fn` with block bodies `let f = fn a b { let c = a + b; c * 2 }`.
+* Indexing expressions `arr[i]` and chaining with other postfix forms (`{ [1,2,3] }[0]`).
+
+### Block Expressions
+
+TONG supports block expressions as values: a brace-delimited sequence of statements that yields the value of its final bare expression (if any). This enables inline scoping and multi-step computations inside larger expressions.
+
+Example:
+```tong
+let result = {
+    let a = 10
+    let b = a * 3
+    b + 7   // last expression becomes the block value (37)
+}
+print(result)
+```
+Semantics:
+* All `let` / assignment statements inside the block are scoped to the block.
+* If the block ends with a bare `Expr` statement, its value is returned; otherwise the block yields an empty array `[]` for now (placeholder “unit”).
+* Blocks compose with other postfix operators: `{ [100,200,300] }[1]` -> `200`.
+
+Anonymous function literals (`fn ... { ... }`) reuse block expression semantics so multi-statement function bodies can be written inline without defining a named function.
+
+### Indexing & Postfix Chaining
+
+Indexing is an expression form with the highest precedence tier (alongside call/property). It can be chained arbitrarily:
+```tong
+let grid = [[1,2],[3,4]]
+print(grid[1][0])      // 3
+{ [10,20,30] }[2]      // 30 (inside larger expression if desired)
+```
+Rules:
+* Index expression `target[index]` evaluates `target` then `index` (left-to-right) and expects an array / list.
+* Out-of-bounds access triggers a runtime error.
+* Indexing works on the result of any expression, including constructor calls, lambdas returning arrays, or block expressions.
+
+Array update sugar (`arr[i] = expr`) is statement-level and distinct from expression indexing: it produces an updated array value immutably (clones underlying vector and writes the slot).
+
+### Anonymous Function Syntax Summary
+
+Three equivalent anonymous function literal forms are currently supported (all produce a first-class function value and support partial application):
+
+| Form | Example | Arity inference | Notes |
+|------|---------|-----------------|-------|
+| Pipe single-param | `let inc = |x| x + 1` | 1 param | Shorthand for a single argument; body is expression following `|param|`. |
+| Backslash multi-param | `let add = \a b -> a + b` | Count identifiers before `->` | Multiple params separated by spaces; right side is a single expression. |
+| `fn` with block | `let f = fn a b { let c = a + b; c * 2 }` | Count identifiers before `{` | Full block body: any number of statements; last bare expression is return value. |
+
+All forms support partial application (currying) when invoked with fewer arguments than declared.
+Examples:
+```tong
+let add3 = \a b c -> a + b + c
+let add1 = add3(1)       // <partial:add3:1>
+let add1_2 = add1(2)     // <partial:add3:2>
+print(add1_2(7))         // 10
+
+let scale_then = fn factor { fn x { x * factor } }
+let double = scale_then(2)
+print(double(21))        // 42
+```
+
+### Operator Precedence (Highest → Lowest)
+
+1. Indexing / Call / Property (postfix)
+2. Unary: `-`, `+`, `!`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Comparison: `<`, `<=`, `>`, `>=`
+6. Equality: `==`, `!=`
+7. Conjunction: `&`
+8. Disjunction: `||`
+9. (Assignments are statement-level only: `let x =`, `x =`, `arr[i] =`)
+
+All binary operators are left-associative. Parentheses may be used to override default grouping.
+* Short-circuit logical operators `&` (AND), `||` (OR) and unary `!` (NOT).
+* Array element update sugar: `arr[i] = expr` (clones + updates underlying array immutably).
+
+### Operator Precedence (highest → lowest)
+
+The parser implements a conventional precedence ladder. Parentheses `(...)` may always be used to override defaults.
+
+1. Indexing / Property / Call chaining: `arr[i]`, `obj.prop`, `func(x)` (left-associative)
+2. Unary prefix: `!expr`, `-expr`, `+expr`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Comparison: `<`, `<=`, `>`, `>=`
+6. Equality: `==`, `!=`
+7. Logical AND: `&` (short‑circuit)
+8. Logical OR: `||` (short‑circuit)
+
+Notes:
+* All binary operators are left-associative currently.
+* `&` and `||` short‑circuit: the right operand is only evaluated if needed.
+* Unary `!` expects a Bool; unary `-` expects numeric.
+* There is no assignment expression; `=` is only a statement form (`let x = ...` or `x = ...`).
+* `arr[i] = v` is syntactic sugar for cloning the array and writing index `i`; bounds checked.
+* Future additions (e.g. exponentiation) may introduce a new higher precedence tier.
+
+Planned next:
+* Additional guarded pattern clause examples (showing ordering & guard short‑circuit).
+* Exhaustiveness & redundancy warnings.
+* Type annotations & inference groundwork.
+* Improved partial introspection / debug printing.
+* Better error spans / diagnostics.
+
+### Constructor Partial Application
+
+Constructors behave like functions: applying fewer arguments than the declared arity produces a partial that can be saturated later.
+
+Example (`examples/features/constructor_partial.tong`):
+```tong
+data Tree = Leaf v | Node left right
+
+let left_only = Node(Leaf(1))      // <partial:Node:1>
+let full = left_only(Leaf(2))      // Node(Leaf(1),Leaf(2))
+print(full)
+```
+This mirrors partial application for functions and lambdas and enables ergonomic construction of deeply nested values.
+
 ## REPL
 Run without a file to enter the interactive REPL:
 
@@ -403,6 +562,67 @@ Typical workflow:
 4. Open a pull request and tell us what you improved
 
 No contribution is too small — even typo fixes are appreciated. If you’re unsure where to start, open a GitHub Discussion or Issue and say hello.
+
+## Example Output Regression Harness
+
+All example programs under `examples/` are treated as golden tests. Their expected outputs (including warning lines) live in `examples/expected/` with the same relative path and a `.out` extension. The harness ensures language/runtime changes don’t silently alter behavior.
+
+Generate / refresh every snapshot (non‑SDL examples):
+
+```bash
+bash scripts/gen_expected.sh
+```
+
+Run full regression check (fails on any diff):
+
+```bash
+bash scripts/check_examples.sh
+```
+
+Focused mode (only run specific examples):
+
+```bash
+FILES=hello.tong bash scripts/check_examples.sh
+FILES="hello.tong math.tong" bash scripts/check_examples.sh
+FILES=hello.tong,math.tong bash scripts/check_examples.sh   # commas also work
+```
+
+Auto‑update only failing/missing snapshots (use with review of git diff):
+
+```bash
+UPDATE=1 bash scripts/check_examples.sh
+```
+
+Combine focused & update:
+
+```bash
+FILES=features/pattern_clause_redundant.tong UPDATE=1 bash scripts/check_examples.sh
+```
+
+Run via Cargo tests (integration wrapper executes the harness):
+
+```bash
+cargo test --manifest-path rust/tong/Cargo.toml -- --nocapture
+```
+
+Typical workflow for intentional output changes:
+1. Modify runtime / parser / examples.
+2. Run the checker: `bash scripts/check_examples.sh` (see failing diffs).
+3. Validate changes are desired.
+4. Refresh just the changed snapshots: `UPDATE=1 bash scripts/check_examples.sh` (or regenerate all with `gen_expected.sh`).
+5. Inspect and commit updated `.out` files with your code changes.
+
+Notes:
+- SDL examples are skipped (interactive / feature‑gated).
+- Warning lines beginning with `[TONG][warn]` are asserted; wording changes require snapshot updates.
+- CI runs the harness on every push & PR; mismatches fail the build.
+
+Future enhancements (planned):
+- Optional output normalization flags (timestamps, paths, etc.).
+- DRY_RUN mode to preview updates without writing files.
+- Parallel execution for faster runs on large example sets.
+- Glob pattern filtering (e.g. `FILES='rosetta/*'`).
+
 
 ## Contributing
 

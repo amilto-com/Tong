@@ -1,0 +1,10 @@
+// Algebraic data type declaration and usage
+
+data Maybe = Nothing | Just x
+
+fn show_maybe(m) { return match m { Nothing -> "Nothing", Just(x) -> "Just" } }
+
+let a = Nothing
+let b = Just(42)
+print(show_maybe(a))
+print(show_maybe(b))

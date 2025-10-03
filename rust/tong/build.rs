@@ -7,8 +7,16 @@ fn main() {
         .args(["rev-parse", "--short", "HEAD"])
         .output()
         .ok()
-        .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None });
-    if let Some(h) = git_hash { println!("cargo:rustc-env=GIT_HASH={}", h); }
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        });
+    if let Some(h) = git_hash {
+        println!("cargo:rustc-env=GIT_HASH={}", h);
+    }
     // Dirty flag
     let dirty = Command::new("git")
         .args(["diff", "--quiet"])
@@ -17,6 +25,9 @@ fn main() {
         .unwrap_or("unknown");
     println!("cargo:rustc-env=GIT_DIRTY={}", dirty);
     // Build timestamp (unix seconds)
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     println!("cargo:rustc-env=BUILD_UNIX={}", ts);
 }

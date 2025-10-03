@@ -1,0 +1,28 @@
+TONG REPL - type :help for commands, :quit to exit
+tong> tong> tong> sum 42
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> tong> fmJ 5
+tong> fmN 0
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> Error: no guard matched for fact
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> inc41 42
+tong> sq7 49
+tong> tong> add2_3 5
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> squares [1, 4, 9, 16, 25]
+tong> Error: expected RParen at line 1, col 20
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> Error: expected RParen at line 1, col 31
+tong> tong> Error: undefined variable short1
+tong> Error: expected RParen at line 1, col 31
+tong> Error: undefined variable short2
+tong> tong> logicMix true
+tong> tong> Error: lex error at 2:1 near '#'
+tong> tong> tong> arr 0 1 2
+tong> tong> Error: lex error at 2:1 near '#'
+tong> .... .... .... .... tong> make 11
+tong> tong> grid10 3
+tong> tong> Error: lex error at 2:1 near '#'
+tong> Error: unknown function print
+tong> tong> 

@@ -1,0 +1,30 @@
+// Demonstrate logical short-circuit for '&' and '||'
+// expected: AND1 false, side-effect not incremented until second print, OR1 true without incrementing again
+
+fn inc(counter) {
+  let v = counter[0] + 1
+  // return new value; caller will rebind array manually (since in-place index assignment not yet supported)
+  v
+}
+
+fn main() {
+  let c = [0]
+  // '&' short-circuit: left false -> right not evaluated
+  let a = false & (inc(c) == 1)
+  print("AND1", a, "count", c[0]) // count stays 0
+  // '&' left true -> right evaluated
+  let tmp = inc(c)
+  let b = true & (tmp == 1)
+  let c = [tmp]
+  print("AND2", b, "count", c[0]) // count now 1
+  // '||' left true -> right not evaluated
+  let d = true || (inc(c) == 2)
+  print("OR1", d, "count", c[0]) // count still 1
+  // '||' left false -> right evaluated
+  let tmp2 = inc(c)
+  let e = false || (tmp2 == 2)
+  let c = [tmp2]
+  print("OR2", e, "count", c[0]) // count now 2
+}
+
+main()

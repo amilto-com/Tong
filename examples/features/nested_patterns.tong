@@ -1,0 +1,19 @@
+// Nested constructor pattern example (reintroduced with simple recursion)
+// Demonstrates:
+//  - Algebraic data type with recursive constructors
+//  - Parenthesized constructor calls
+//  - Pattern matching over nested structures
+
+data Tree = Leaf v | Node left right
+
+// Build a sample tree: Node(Leaf(1), Node(Leaf(2), Leaf(3))) => sum 6
+let t = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
+
+fn tree_sum(tree) {
+	match tree {
+		Leaf(x) -> x,
+		Node(l, r) -> tree_sum(l) + tree_sum(r)
+	}
+}
+
+print(tree_sum(t))  // 6

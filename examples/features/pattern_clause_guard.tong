@@ -1,0 +1,11 @@
+data Maybe = Just x | Nothing
+
+def classify(Just(x)) if x > 10 { 1 }
+
+def classify(Just(_)) { 0 }
+
+def classify(Nothing) { -1 }
+
+print(classify(Just(42)))   // 1 (guard matches first clause)
+print(classify(Just(5)))    // 0 (falls through to second clause)
+print(classify(Nothing))    // -1

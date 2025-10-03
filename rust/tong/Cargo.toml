@@ -22,3 +22,6 @@ default = []
 # Enable a real SDL3 window/rendering backend instead of the headless shim
 sdl3 = ["dep:sdl3"]
 
+[dev-dependencies]
+tempfile = "3"
+

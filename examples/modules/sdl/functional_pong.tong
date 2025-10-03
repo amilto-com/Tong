@@ -1,0 +1,140 @@
+// Functional Pong using Haskell-style guarded multi-clause functions and logical operators
+// Demonstrates:
+//  - Guarded function clauses (fn f(args) if condition { ... })
+//  - Pattern parameter clauses for simple boolean direction function
+//  - Pure state evolution via immutable array-based state
+//  - Logical operators: '&' (AND), '||' (OR), '!' (NOT) mixed in guards with short-circuiting
+
+// state as array to avoid current parser object + guard interaction
+// [0]=win_w [1]=win_h [2]=ball_x [3]=ball_y [4]=ball_vx [5]=ball_vy [6]=ball_size
+// [7]=p1_x [8]=p2_x [9]=p_width [10]=p_height [11]=p1_y [12]=p2_y [13]=score1 [14]=score2 [15]=frame
+fn state(win_w, win_h, ball_x, ball_y, ball_vx, ball_vy, ball_size,
+    p1_x, p2_x, p_width, p_height, p1_y, p2_y, score1, score2, frame) {
+  [win_w, win_h, ball_x, ball_y, ball_vx, ball_vy, ball_size,
+   p1_x, p2_x, p_width, p_height, p1_y, p2_y, score1, score2, frame]
+}
+
+fn make_state() {
+  state(800, 600, 400, 300, 5, 4, 12, 20, 800 - 20 - 15, 15, 80, 260, 260, 0, 0, 0)
+}
+
+// clamp with guards (purely guarded so no shadowing)
+fn clamp(v, lo, hi) if v < lo { lo }
+fn clamp(v, lo, hi) if v > hi { hi }
+// Final guard uses combined OR to show precedence with AND: (v >= lo & v <= hi) || true always matches.
+fn clamp(v, lo, hi) if (v >= lo & v <= hi) || true { v }
+
+// direction (pattern parameter clauses)
+fn dir(true, true)  { 0 }
+fn dir(true, false) { -8 }
+fn dir(false, true) { 8 }
+fn dir(false, false){ 0 }
+
+// step_ball: top bounce, bottom bounce, default (all guarded)
+// Use OR in first two clauses to illustrate alternative bounce predicate forms; second part is redundant but demonstrates short-circuit
+fn step_ball(st) if (st[3] + st[5] <= 0) || (st[3] <= 0 & !false) {
+  state(st[0], st[1], st[2] + st[4], 0, st[4], -st[5], st[6],
+    st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
+}
+fn step_ball(st) if st[3] + st[5] >= st[1] - st[6] || (st[3] >= st[1] - st[6] & st[5] > 0) {
+  state(st[0], st[1], st[2] + st[4], st[1] - st[6], st[4], -st[5], st[6],
+    st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
+}
+fn step_ball(st) if true {
+  state(st[0], st[1], st[2] + st[4], st[3] + st[5], st[4], st[5], st[6],
+        st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
+}
+
+// paddle collision using '&' guards (all guarded)
+// Left paddle collision mixes AND/OR and NOT to illustrate precedence: require direction AND horizontal overlap AND (vertical overlap OR near miss with upward motion)
+fn paddle_collision(st)
+  if st[4] < 0 & st[2] <= st[7] + st[9] & st[2] + st[6] >= st[7]
+    & ((st[3] + st[6] >= st[11] & st[3] <= st[11] + st[10]) || (st[3] + st[6] >= st[11] - 1 & ! (st[3] > st[11] + st[10] + 1))) {
+  state(st[0], st[1], st[7] + st[9], st[3], -st[4], st[5], st[6],
+        st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
+}
+fn paddle_collision(st)
+  if st[4] > 0 & st[2] + st[6] >= st[8] & st[2] <= st[8] + st[9]
+    & ((st[3] + st[6] >= st[12] & st[3] <= st[12] + st[10]) || (st[3] <= st[12] + st[10] + 1 & !false)) {
+  state(st[0], st[1], st[8] - st[6], st[3], -st[4], st[5], st[6],
+        st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15])
+}
+fn paddle_collision(st) if true { st }
+
+// scoring guards (respawn + score increment)
+fn scoring(st) if st[2] < 0 & !(st[2] + st[6] >= 0) || st[2] < -5 {
+  state(st[0], st[1], 400, 300, 5, 4, st[6],
+        st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14] + 1, st[15])
+}
+fn scoring(st) if (st[2] > st[0] & !(st[2] <= st[0])) || st[2] > st[0] + 5 {
+  state(st[0], st[1], 400, 300, -5, 4, st[6],
+        st[7], st[8], st[9], st[10], st[11], st[12], st[13] + 1, st[14], st[15])
+}
+fn scoring(st) if st[2] >= 0 & st[2] <= st[0] { st }
+
+fn apply_input(st, sdl) {
+  let p1_dy = dir(sdl.key_down(sdl.K_W), sdl.key_down(sdl.K_S))
+  let p2_dy = dir(sdl.key_down(sdl.K_UP), sdl.key_down(sdl.K_DOWN))
+  let np1 = clamp(st[11] + p1_dy, 0, st[1] - st[10])
+  let np2 = clamp(st[12] + p2_dy, 0, st[1] - st[10])
+  state(st[0], st[1], st[2], st[3], st[4], st[5], st[6],
+    st[7], st[8], st[9], st[10], np1, np2, st[13], st[14], st[15])
+}
+
+fn evolve(st) { scoring(paddle_collision(step_ball(st))) }
+
+fn advance_frame(st) { state(st[0], st[1], st[2], st[3], st[4], st[5], st[6], st[7], st[8], st[9], st[10], st[11], st[12], st[13], st[14], st[15] + 1) }
+
+// iterative loop (avoid deep recursion stack overflow)
+fn game_loop(st, sdl, ren, max) {
+  let cur = st
+  while cur[15] < max {
+    if sdl.poll_quit() { return cur }
+    if sdl.key_down(sdl.K_ESCAPE) { return cur }
+    if sdl.key_down(sdl.K_Q) { return cur }
+    let with_input = apply_input(cur, sdl)
+    let evolved = evolve(with_input)
+    let advanced = advance_frame(evolved)
+    render(advanced, sdl, ren)
+    sdl.delay(16)
+    cur = advanced
+  }
+  cur
+}
+
+fn render(st, sdl, ren) {
+  sdl.set_draw_color(ren, 10, 10, 25, 255)
+  sdl.clear(ren)
+  sdl.fill_rect(ren, 398, 0, 4, st[1], 200,200,200,255)
+  sdl.fill_rect(ren, st[2], st[3], st[6], st[6], 255,255,0,255)
+  sdl.fill_rect(ren, st[7], st[11], st[9], st[10], 0,255,255,255)
+  sdl.fill_rect(ren, st[8], st[12], st[9], st[10], 255,0,255,255)
+  // simple tally scoreboard
+  let i = 0
+  while i < st[13] {
+  sdl.fill_rect(ren, 380 - 20 - i*6, 20, 4, 16, 255,255,255,255)
+    i = i + 1
+  }
+  let j = 0
+  while j < st[14] {
+  sdl.fill_rect(ren, 420 + j*6, 20, 4, 16, 255,255,255,255)
+    j = j + 1
+  }
+  sdl.present(ren)
+}
+
+fn main() {
+  let sdl = import("sdl")
+  sdl.init()
+  let win = sdl.create_window("Functional Pong (guards & '&')", 800, 600)
+  let ren = sdl.create_renderer(win)
+  let st0 = make_state()
+  let final = game_loop(st0, sdl, ren, 20000)
+  print("Final score:", final[13], "-", final[14])
+  sdl.destroy_renderer(ren)
+  sdl.destroy_window(win)
+  sdl.quit()
+}
+
+main()
+ 
