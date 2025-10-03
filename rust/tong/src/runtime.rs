@@ -81,6 +81,7 @@ struct Env {
     #[cfg(feature = "sdl3")] sdl: Option<SdlState>,
     data_ctors: HashMap<String, usize>, // ctor name -> arity
     type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
+    ctor_type: HashMap<String, String>,       // ctor name -> type name
 }
 
 impl Env {
@@ -153,7 +154,7 @@ impl Env {
                     _ => bail!("destructuring expects array value"),
                 }
             }
-            Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); } self.type_ctors.insert(type_name.clone(), names); Ok(None) }
+            Stmt::DataDecl(type_name, ctors) => { let mut names = Vec::new(); for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); names.push(c.name.clone()); self.ctor_type.insert(c.name.clone(), type_name.clone()); } self.type_ctors.insert(type_name.clone(), names); Ok(None) }
             Stmt::Expr(e) => {
                 let _ = self.eval_expr(e.clone())?;
                 Ok(None)
@@ -203,6 +204,7 @@ impl Env {
             sdl: None,
             data_ctors: HashMap::new(),
             type_ctors: HashMap::new(),
+            ctor_type: HashMap::new(),
         }
     }
     fn vars(&self) -> &HashMap<String, Value> {
@@ -799,15 +801,16 @@ impl Env {
         let mut used: Vec<String> = Vec::new();
         for (p,_,_) in arms { if let Pattern::Constructor { name, .. } = p { if !used.contains(name) { used.push(name.clone()); } } }
         if used.is_empty() { return Ok(()); }
-        // Gather all known constructors; if all known ctors for some type are covered, fine; if not, warn.
-        // We don't have reverse mapping from ctor->type, so approximate: for each type, if any of its ctors appear in used, consider it the candidate set.
-        for (ty, ctors) in &self.type_ctors {
-            if ctors.iter().any(|c| used.contains(c)) {
-                let missing: Vec<&String> = ctors.iter().filter(|c| !used.contains(c)).collect();
-                if !missing.is_empty() {
-                    let mut first = true; let mut list = String::new();
-                    for m in missing { if !first { list.push(','); } list.push_str(m); first=false; }
-                    eprintln!("[TONG][warn] non-exhaustive match for type '{ty}'; missing constructors: {list}");
+        // Determine candidate type: pick first used constructor and map to its type (reverse map).
+        if let Some(first_ctor) = used.first() {
+            if let Some(ty) = self.ctor_type.get(first_ctor) {
+                if let Some(ctors) = self.type_ctors.get(ty) {
+                    let missing: Vec<&String> = ctors.iter().filter(|c| !used.contains(c)).collect();
+                    if !missing.is_empty() && std::env::var("TONG_NO_MATCH_WARN").is_err() {
+                        let mut first = true; let mut list = String::new();
+                        for m in missing { if !first { list.push(','); } list.push_str(m); first=false; }
+                        eprintln!("[TONG][warn] non-exhaustive match for type '{ty}'; missing constructors: {list}");
+                    }
                 }
             }
         }
@@ -832,7 +835,7 @@ impl Env {
         for (idx, (pat, guard, _body)) in arms.iter().enumerate() {
             if wildcard_seen {
                 // If earlier wildcard had a guard, later arms might still be relevant; only treat as unreachable if earlier wildcard had no guard
-                if seen_unconditional.contains("_") {
+                if seen_unconditional.contains("_") && std::env::var("TONG_NO_MATCH_WARN").is_err() {
                     eprintln!("[TONG][warn] unreachable match arm #{idx} (follows wildcard)");
                 }
                 continue;
@@ -843,7 +846,7 @@ impl Env {
                     if is_unconditional_guard { seen_unconditional.insert(k.clone()); }
                     wildcard_seen = true; continue; }
                 if is_unconditional_guard {
-                    if seen_unconditional.contains(&k) {
+                    if seen_unconditional.contains(&k) && std::env::var("TONG_NO_MATCH_WARN").is_err() {
                         eprintln!("[TONG][warn] redundant match arm #{idx} (pattern already covered)");
                     } else {
                         seen_unconditional.insert(k);
