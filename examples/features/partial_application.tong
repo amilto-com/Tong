@@ -1,6 +1,6 @@
 // Partial application of functions, lambdas, and constructors
 
-data Pair = MkPair a b
+data Pair = MkPair a b  // constructors now consistently called with parentheses
 
 fn add(a,b,c){ return a + b + c }
 
