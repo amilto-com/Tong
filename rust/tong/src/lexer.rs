@@ -28,6 +28,12 @@ pub enum TokenKind {
     While,
     #[token("parallel")]
     Parallel,
+    #[token("data")]
+    Data,
+    #[token("match")]
+    Match,
+    #[token("in")]
+    In,
     // Strings: naive double-quoted without escapes handling for MVP
     #[regex(r#""[^"\n]*""#)]
     String,
@@ -58,6 +64,10 @@ pub enum TokenKind {
     Dot,
     #[token("|")]
     Pipe,
+    #[token("->")]
+    Arrow,
+    #[token("\\")]
+    Backslash,
     #[token("==")]
     EqualEqual,
     #[token("!=")]

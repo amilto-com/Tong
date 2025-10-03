@@ -5,7 +5,7 @@ use anyhow::anyhow; // anyhow! macro for SDL code paths
 #[cfg(feature = "sdl3")]
 use std::time::Duration; // Duration used in sdl_delay
 
-use crate::parser::{BinOp, Expr, Program, Stmt};
+use crate::parser::{BinOp, Expr, Program, Stmt, Pattern};
 
 // Built-in module registry (update when adding more modules)
 pub fn builtin_modules() -> Vec<&'static str> { vec!["sdl", "linalg"] }
@@ -24,47 +24,28 @@ pub fn execute(program: Program) -> Result<()> {
 
     // First collect function definitions
     for stmt in &program.stmts {
-        if let Stmt::FnDef(name, params, body) = stmt {
-            env.funcs
-                .insert(name.clone(), (params.clone(), body.clone()));
-        }
-        if let Stmt::FnMain(body) = stmt {
-            env.funcs
-                .insert("main".to_string(), (Vec::new(), body.clone()));
-        }
-    }
-
-    // Execute top-level statements (import/let/assign/print)
-    for stmt in &program.stmts {
         match stmt {
-            Stmt::Import(name, module) => {
-                let v = env.import_module(module)?;
-                env.vars_mut().insert(name.clone(), v);
+            Stmt::FnDef(name, params, body) => { env.funcs.insert(name.clone(), (params.clone(), body.clone())); }
+            Stmt::FnDefGuarded(name, params, guard, body) => {
+                env.guarded_funcs.entry(name.clone()).or_default().push((params.clone(), guard.clone(), body.clone()));
             }
-            Stmt::Let(name, expr) => {
-                let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
-            }
-            Stmt::Assign(name, expr) => {
-                let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
-            }
-            Stmt::Print(args) => {
-                let parts: Result<Vec<String>> = args
-                    .iter()
-                    .cloned()
-                    .map(|e| env.eval_expr(e).map(|v| format_value(&v)))
-                    .collect();
-                println!("{}", parts?.join(" "));
-            }
-            Stmt::Expr(e) => {
-                let _ = env.eval_expr(e.clone())?;
-            }
+            Stmt::FnMain(body) => { env.funcs.insert("main".to_string(), (Vec::new(), body.clone())); }
+            Stmt::DataDecl(_, ctors) => { for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); } }
             _ => {}
         }
     }
 
-    // Call main() if present unless the script calls it explicitly; to avoid double-run, we no longer auto-invoke here.
+    // Execute top-level statements (import/let/assign/print)
+    for stmt in &program.stmts { match stmt {
+        Stmt::Import(name, module) => { let v = env.import_module(module)?; env.vars_mut().insert(name.clone(), v); }
+        Stmt::Let(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
+        Stmt::Assign(name, expr) => { let v = env.eval_expr(expr.clone())?; env.vars_mut().insert(name.clone(), v); }
+        Stmt::LetTuple(names, expr) => { let v = env.eval_expr(expr.clone())?; match v { Value::Array(items) => { if items.len() != names.len() { bail!("tuple arity mismatch"); } for (n,it) in names.iter().zip(items.into_iter()) { env.vars_mut().insert(n.clone(), it); } }, _ => bail!("destructuring expects array value"), } }
+        Stmt::Print(args) => { let parts: Result<Vec<String>> = args.iter().cloned().map(|e| env.eval_expr(e).map(|v| format_value(&v))).collect(); println!("{}", parts?.join(" ")); }
+        Stmt::Expr(e) => { let _ = env.eval_expr(e.clone())?; }
+        Stmt::DataDecl(_, ctors) => { for c in ctors { env.data_ctors.insert(c.name.clone(), c.arity); } }
+        Stmt::FnDefGuarded(_,_,_,_) => { /* already collected */ }
+        _ => {} } }
 
     Ok(())
 }
@@ -83,17 +64,22 @@ enum Value {
     },
     FuncRef(String),
     Object(HashMap<String, Value>),
+    Constructor { name: String, fields: Vec<Value> },
+    Partial { name: String, applied: Vec<Value> },
 }
+
+type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
 
 #[derive(Default)]
 struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
     funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
-    modules: HashMap<String, Value>, // loaded modules
-    #[cfg(not(feature = "sdl3"))]
-    sdl_frame: i64, // headless SDL shim frame counter
-    #[cfg(feature = "sdl3")]
-    sdl: Option<SdlState>,
+    #[allow(clippy::type_complexity)]
+    guarded_funcs: HashMap<String, Vec<GuardedClause>>, // guarded multi-clause
+    modules: HashMap<String, Value>,
+    #[cfg(not(feature = "sdl3"))] sdl_frame: i64,
+    #[cfg(feature = "sdl3")] sdl: Option<SdlState>,
+    data_ctors: HashMap<String, usize>,
 }
 
 impl Env {
@@ -142,6 +128,22 @@ impl Env {
                     .insert(name.clone(), (params.clone(), body.clone()));
                 Ok(None)
             }
+            Stmt::FnDefGuarded(name, params, guard, body) => {
+                self.guarded_funcs.entry(name.clone()).or_default().push((params.clone(), guard.clone(), body.clone()));
+                Ok(None)
+            }
+            Stmt::LetTuple(names, expr) => {
+                let v = self.eval_expr(expr.clone())?;
+                match v {
+                    Value::Array(items) => {
+                        if items.len() != names.len() { bail!("tuple arity mismatch"); }
+                        for (n,it) in names.iter().zip(items.into_iter()) { self.vars_mut().insert(n.clone(), it); }
+                        Ok(None)
+                    }
+                    _ => bail!("destructuring expects array value"),
+                }
+            }
+            Stmt::DataDecl(_, ctors) => { for c in ctors { self.data_ctors.insert(c.name.clone(), c.arity); } Ok(None) }
             Stmt::Expr(e) => {
                 let _ = self.eval_expr(e.clone())?;
                 Ok(None)
@@ -183,11 +185,13 @@ impl Env {
         Self {
             vars_stack: vec![HashMap::new()],
             funcs: HashMap::new(),
+            guarded_funcs: HashMap::new(),
             modules: HashMap::new(),
             #[cfg(not(feature = "sdl3"))]
             sdl_frame: 0,
             #[cfg(feature = "sdl3")]
             sdl: None,
+            data_ctors: HashMap::new(),
         }
     }
     fn vars(&self) -> &HashMap<String, Value> {
@@ -206,7 +210,7 @@ impl Env {
     }
 
     fn eval_expr(&mut self, e: Expr) -> Result<Value> {
-        Ok(match e {
+        let v = match e {
             Expr::Property { target, name } => {
                 let obj = self.eval_expr(*target)?;
                 match obj {
@@ -271,13 +275,10 @@ impl Env {
                 _ => bail!("unary '-' expects numeric"),
             },
             Expr::Ident(name) => {
-                if let Some(v) = self.get_var(&name) {
-                    v
-                } else if self.funcs.contains_key(&name) {
-                    Value::FuncRef(name)
-                } else {
-                    bail!("undefined variable {}", name)
-                }
+                if let Some(v) = self.get_var(&name) { v }
+                else if self.funcs.contains_key(&name) { Value::FuncRef(name) }
+                else if let Some(arity) = self.data_ctors.get(&name) { if *arity==0 { Value::Constructor { name, fields: vec![] } } else { Value::FuncRef(name) } }
+                else { bail!("undefined variable {}", name) }
             }
             Expr::Array(items) => {
                 let mut out = Vec::new();
@@ -424,26 +425,108 @@ impl Env {
                         if let Some(v) = self.get_var(&callee) {
                             match v {
                                 Value::Lambda { params, body, env } => {
-                                    let evaled: Result<Vec<Value>> =
-                                        args.into_iter().map(|a| self.eval_expr(a)).collect();
-                                    self.call_lambda_values(params, *body, env, evaled?)?
+                                    let evaled: Result<Vec<Value>> = args.iter().cloned().map(|a| self.eval_expr(a)).collect();
+                                    let vals = evaled?;
+                                    if vals.len() < params.len() {
+                                        // build new lambda with remaining params capturing applied ones
+                                        let mut captured = env.clone();
+                                        for (p,vv) in params.iter().zip(vals.iter()) { captured.insert(p.clone(), vv.clone()); }
+                                        let remaining = params[vals.len()..].to_vec();
+                                        Value::Lambda { params: remaining, body: body.clone(), env: captured }
+                                    } else if vals.len()==params.len() {
+                                        self.call_lambda_values(params, *body, env, vals)?
+                                    } else { bail!("too many arguments for lambda") }
                                 }
                                 Value::FuncRef(name) => {
                                     let evaled: Result<Vec<Value>> =
                                         args.into_iter().map(|a| self.eval_expr(a)).collect();
                                     self.call_function_values(name, evaled?)?
                                 }
+                                Value::Partial { name, applied } => {
+                                    // extend partial
+                                    let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                                    let mut new_applied = applied.clone();
+                                    new_applied.extend(evaled?);
+                                    // Determine target arity (function or constructor)
+                                    if let Some((params, _)) = self.funcs.get(&name) {
+                                        if new_applied.len() < params.len() { Value::Partial { name, applied: new_applied } }
+                                        else if new_applied.len()==params.len() { self.call_function_values(name, new_applied)? }
+                                        else { bail!("too many arguments for function partial") }
+                                    } else if let Some(arity) = self.data_ctors.get(&name) {
+                                        if new_applied.len() < *arity { Value::Partial { name, applied: new_applied } }
+                                        else if new_applied.len()==*arity { Value::Constructor { name, fields: new_applied } }
+                                        else { bail!("too many arguments for constructor partial") }
+                                    } else { bail!("unknown target in partial") }
+                                }
                                 _ => bail!("{} is not callable", callee),
                             }
                         } else if self.funcs.contains_key(&callee) {
-                            let evaled: Result<Vec<Value>> =
-                                args.into_iter().map(|a| self.eval_expr(a)).collect();
-                            self.call_function_values(callee.clone(), evaled?)?
-                        } else {
-                            bail!("unknown function {}", callee)
-                        }
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            let (params, _) = self.funcs.get(&callee).cloned().unwrap();
+                            if vals.len() < params.len() { Value::Partial { name: callee.clone(), applied: vals } }
+                            else if vals.len() == params.len() { self.call_function_values(callee.clone(), vals)? }
+                            else { bail!("too many arguments") }
+                        } else if self.guarded_funcs.contains_key(&callee) {
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            let clauses = self.guarded_funcs.get(&callee).unwrap();
+                            let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
+                            if vals.len() < arity { Value::Partial { name: callee.clone(), applied: vals } }
+                            else if vals.len()==arity { self.call_guarded_function_values(callee.clone(), vals)? }
+                            else { bail!("too many arguments") }
+                        } else if let Some(arity) = self.data_ctors.get(&callee).cloned() {
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            if vals.len() < arity { Value::Partial { name: callee, applied: vals } }
+                            else if vals.len() == arity { Value::Constructor { name: callee, fields: vals } }
+                            else { bail!("constructor arity mismatch") }
+                        } else if callee == "<partial>" { bail!("invalid partial placeholder") }
+                        else if self.guarded_funcs.contains_key(&callee) {
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            // Determine arity from first clause
+                            let clauses = self.guarded_funcs.get(&callee).unwrap();
+                            let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
+                            if vals.len() < arity { Value::Partial { name: callee.clone(), applied: vals } }
+                            else if vals.len()==arity { self.call_guarded_function_values(callee.clone(), vals)? }
+                            else { bail!("too many arguments") }
+                        } else { bail!("unknown function {}", callee) }
                     }
                 }
+            }
+            Expr::ListComp { elem, var, list, pred } => {
+                let list_val = self.eval_expr(*list)?;
+                match list_val {
+                    Value::Array(items) => {
+                        let mut out = Vec::new();
+                        for it in items {
+                            self.vars_mut().insert(var.clone(), it.clone());
+                            if let Some(p) = &pred { let pv = self.eval_expr(*p.clone())?; if !matches!(pv, Value::Bool(true)) { continue; } }
+                            let ev = self.eval_expr(*elem.clone())?; out.push(ev);
+                        }
+                        Value::Array(out)
+                    }
+                    _ => bail!("list comprehension expects array source"),
+                }
+            }
+            Expr::Match { scrutinee, arms } => {
+                let val = self.eval_expr(*scrutinee)?;
+                for (pat, guard, body) in arms {
+                    // new scope for pattern bindings
+                    self.vars_stack.push(HashMap::new());
+                    let matched = self.match_pattern(&pat, &val)?;
+                    let guard_pass = if matched {
+                        if let Some(g) = guard.clone() { matches!(self.eval_expr(g)?, Value::Bool(true)) } else { true }
+                    } else { false };
+                    if matched && guard_pass {
+                        let res = self.eval_expr(body)?;
+                        self.vars_stack.pop();
+                        return Ok(res);
+                    }
+                    self.vars_stack.pop();
+                }
+                bail!("non-exhaustive match")
             }
             Expr::Binary { op, left, right } => {
                 let l = self.eval_expr(*left)?;
@@ -504,7 +587,8 @@ impl Env {
                     (l, r, _) => bail!("unsupported operands for operation: {:?}", (l, r)),
                 }
             }
-        })
+        };
+        Ok(v)
     }
 
     fn apply_callable(&mut self, func: Expr, args: Vec<Expr>) -> Result<Value> {
@@ -515,14 +599,41 @@ impl Env {
                     match v {
                         Value::Lambda { params, body, env } => {
                             // Evaluate args then call with values to preserve object args
-                            let evaled: Result<Vec<Value>> =
-                                args.into_iter().map(|a| self.eval_expr(a)).collect();
-                            self.call_lambda_values(params, *body, env, evaled?)
+                            let evaled: Result<Vec<Value>> = args.iter().cloned().map(|a| self.eval_expr(a)).collect();
+                            let vals = evaled?;
+                            if vals.len() < params.len() {
+                                let mut captured = env.clone();
+                                for (p,vv) in params.iter().zip(vals.iter()) { captured.insert(p.clone(), vv.clone()); }
+                                let remaining = params[vals.len()..].to_vec();
+                                Ok(Value::Lambda { params: remaining, body: body.clone(), env: captured })
+                            } else if vals.len() == params.len() {
+                                self.call_lambda_values(params, *body, env, vals)
+                            } else { bail!("too many arguments for lambda") }
                         }
                         Value::FuncRef(fname) => {
-                            let evaled: Result<Vec<Value>> =
-                                args.into_iter().map(|a| self.eval_expr(a)).collect();
-                            self.call_function_values(fname, evaled?)
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            if self.funcs.contains_key(&fname) { self.call_function_values(fname, evaled?) }
+                            else if self.guarded_funcs.contains_key(&fname) { self.call_guarded_function_values(fname, evaled?) }
+                            else { bail!("unknown function {}", fname) }
+                        }
+                        Value::Partial { name, applied } => {
+                            let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
+                            let mut new_applied = applied.clone();
+                            new_applied.extend(evaled?);
+                            if let Some((params,_)) = self.funcs.get(&name) {
+                                if new_applied.len() < params.len() { Ok(Value::Partial { name, applied: new_applied }) }
+                                else if new_applied.len() == params.len() { self.call_function_values(name, new_applied) }
+                                else { bail!("too many arguments for function partial") }
+                            } else if let Some(clauses) = self.guarded_funcs.get(&name) {
+                                let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
+                                if new_applied.len() < arity { Ok(Value::Partial { name, applied: new_applied }) }
+                                else if new_applied.len()==arity { self.call_guarded_function_values(name, new_applied) }
+                                else { bail!("too many arguments for function partial") }
+                            } else if let Some(arity) = self.data_ctors.get(&name) {
+                                if new_applied.len() < *arity { Ok(Value::Partial { name, applied: new_applied }) }
+                                else if new_applied.len() == *arity { Ok(Value::Constructor { name, fields: new_applied }) }
+                                else { bail!("too many arguments for constructor partial") }
+                            } else { bail!("unknown target in partial") }
                         }
                         _ => bail!("{} is not callable", name),
                     }
@@ -586,54 +697,60 @@ impl Env {
         result
     }
     fn call_function(&mut self, name: String, args: Vec<Expr>) -> Result<Value> {
-        // Built-in shims for SDL module
         if name.starts_with("sdl_") { return self.call_sdl_builtin(&name, args); }
-        if name.starts_with("linalg_") {
-            // evaluate arguments to values and use values version
+        if name.starts_with("linalg_") { let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect(); return self.call_linalg_builtin_values(&name, evaled?); }
+        if let Some((params, body)) = self.funcs.get(&name).cloned() {
+            if params.len()!=args.len() { bail!("arity mismatch for {}", name); }
+            self.vars_stack.push(HashMap::new());
+            for (p,a) in params.iter().zip(args.into_iter()) { let val = self.eval_expr(a)?; self.vars_mut().insert(p.clone(), val); }
+            let ret = self.exec_block(&body)?; self.vars_stack.pop();
+            Ok(ret.unwrap_or(Value::Int(0)))
+        } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
+            if clauses.is_empty() { bail!("no clauses for guarded function {name}"); }
+            let arity = clauses[0].0.len();
+            if arity != args.len() { bail!("arity mismatch for {}", name); }
             let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-            return self.call_linalg_builtin_values(&name, evaled?);
-        }
-        let (params, body) = self
-            .funcs
-            .get(&name)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("unknown function {}", name))?;
-        if params.len() != args.len() {
-            bail!("arity mismatch for {}", name);
-        }
-        // Push a new frame
-        self.vars_stack.push(HashMap::new());
-        for (p, a) in params.iter().zip(args.into_iter()) {
-            let val = self.eval_expr(a)?;
-            self.vars_mut().insert(p.clone(), val);
-        }
-
-        // Execute body with nested control-flow properly handled
-        let ret = self.exec_block(&body)?;
-        // Pop the frame
-        self.vars_stack.pop();
-        Ok(ret.unwrap_or(Value::Int(0)))
+            self.call_guarded_function_values(name, evaled?)
+        } else { bail!("unknown function {}", name) }
     }
 
     // Function call with pre-evaluated values (avoids expr_from_value conversion issues for objects)
     fn call_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
         if name.starts_with("sdl_") { bail!("internal: call_function_values should not be used for SDL builtins"); }
         if name.starts_with("linalg_") { return self.call_linalg_builtin_values(&name, values); }
-        let (params, body) = self
-            .funcs
-            .get(&name)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("unknown function {}", name))?;
-        if params.len() != values.len() {
-            bail!("arity mismatch for {}", name);
+        if let Some((params, body)) = self.funcs.get(&name).cloned() {
+            if params.len()!=values.len() { bail!("arity mismatch for {}", name); }
+            self.vars_stack.push(HashMap::new());
+            for (p,v) in params.iter().zip(values.into_iter()) { self.vars_mut().insert(p.clone(), v); }
+            let ret = self.exec_block(&body)?; self.vars_stack.pop();
+            Ok(ret.unwrap_or(Value::Int(0)))
+        } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
+            let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
+            if arity != values.len() { bail!("arity mismatch for {}", name); }
+            self.call_guarded_function_values(name, values)
+        } else { bail!("unknown function {}", name) }
+    }
+
+    fn call_guarded_function_values(&mut self, name: String, values: Vec<Value>) -> Result<Value> {
+        let clauses = self.guarded_funcs.get(&name).cloned().ok_or_else(|| anyhow::anyhow!(format!("unknown guarded function {name}")))?;
+        for (params, guard_expr, body) in clauses {
+            if params.len() != values.len() {
+                bail!("arity mismatch for {name}");
+            }
+            self.vars_stack.push(HashMap::new());
+            for (p, v) in params.iter().zip(values.iter()) {
+                self.vars_mut().insert(p.clone(), v.clone());
+            }
+            let gv = self.eval_expr(guard_expr.clone())?;
+            let pass = matches!(gv, Value::Bool(true));
+            if pass {
+                let ret = self.exec_block(&body)?;
+                self.vars_stack.pop();
+                return Ok(ret.unwrap_or(Value::Int(0)));
+            }
+            self.vars_stack.pop();
         }
-        self.vars_stack.push(HashMap::new());
-        for (p, v) in params.iter().zip(values.into_iter()) {
-            self.vars_mut().insert(p.clone(), v);
-        }
-        let ret = self.exec_block(&body)?;
-        self.vars_stack.pop();
-        Ok(ret.unwrap_or(Value::Int(0)))
+        bail!("no guard matched for {name}")
     }
 }
 
@@ -656,6 +773,10 @@ fn format_value(v: &Value) -> String {
         Value::Lambda { .. } => "<lambda>".to_string(),
         Value::FuncRef(name) => format!("<func:{}>", name),
         Value::Object(_) => "<object>".to_string(),
+        Value::Constructor { name, fields } => {
+            if fields.is_empty() { name.clone() } else { format!("{}({})", name, fields.iter().map(format_value).collect::<Vec<_>>().join(",")) }
+        }
+        Value::Partial { name, applied } => format!("<partial:{}:{}>", name, applied.len()),
     }
 }
 
@@ -672,6 +793,8 @@ fn expr_from_value(v: &Value) -> Expr {
         },
         Value::FuncRef(name) => Expr::Ident(name.clone()),
         Value::Object(_) => Expr::Ident("<object>".to_string()),
+        Value::Constructor { name, .. } => Expr::Ident(name.clone()),
+        Value::Partial { name, .. } => Expr::Ident(name.clone()),
     }
 }
 
@@ -679,6 +802,33 @@ fn expr_from_value(v: &Value) -> Expr {
 // no-op
 
 impl Env {
+    fn match_pattern(&mut self, pat: &Pattern, v: &Value) -> Result<bool> {
+        Ok(match pat {
+            Pattern::Wildcard => true,
+            Pattern::Ident(name) => { self.vars_mut().insert(name.clone(), v.clone()); true }
+            Pattern::Int(i) => matches!(v, Value::Int(j) if j==i),
+            Pattern::Bool(b) => matches!(v, Value::Bool(bb) if bb==b),
+            Pattern::Constructor { name, arity, sub } => {
+                if let Value::Constructor { name: cn, fields } = v {
+                    if cn == name && fields.len()==*arity {
+                        for (sp, fv) in sub.iter().zip(fields.iter()) {
+                            if !self.match_pattern(sp, fv)? { return Ok(false); }
+                        }
+                        true
+                    } else { false }
+                } else { false }
+            }
+            Pattern::Tuple(subs) => {
+                if let Value::Array(items) = v {
+                    if items.len() != subs.len() { return Ok(false); }
+                    for (p, iv) in subs.iter().zip(items.iter()) {
+                        if !self.match_pattern(p, iv)? { return Ok(false); }
+                    }
+                    true
+                } else { false }
+            }
+        })
+    }
     fn import_module(&mut self, name: &str) -> Result<Value> {
         if let Some(v) = self.modules.get(name) {
             return Ok(v.clone());

@@ -1,0 +1,22 @@
+// Partial application of functions, lambdas, and constructors
+
+data Pair = MkPair a b
+
+fn add(a,b,c){ return a + b + c }
+
+// Stepwise partial application
+let add2 = add(2)        // <partial:add:1>
+let add2_3 = add2(3)     // <partial:add:2>
+print(add2_3(10))        // 15
+print(add(2,3,4))        // 9
+
+// Lambda partial
+let inc3 = \x y z -> x + y + z
+let inc3_1 = inc3(1)
+let inc3_1_2 = inc3_1(2)
+print(inc3_1_2(5))       // 8
+
+// Constructor partial
+let p_left = MkPair(10)  // partial waiting right value
+let p_full = p_left(20)
+print(p_full)            // MkPair(10,20)

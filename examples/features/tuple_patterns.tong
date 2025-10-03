@@ -1,0 +1,12 @@
+// Tuple (array) pattern matching
+
+let triple = [1,2,3]
+let triple_out = match triple {
+  (a,b,c) if a < b -> [a,b,c],
+  _ -> [0]
+}
+print(triple_out)
+
+let pair = [10,20]
+let pair_out = match pair { (x,_) -> x }
+print(pair_out)

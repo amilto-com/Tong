@@ -1,0 +1,5 @@
+// Tuple (array) destructuring
+
+let triple = [10,20,30]
+let (a,b,c) = triple
+print(a,b,c)
