@@ -2,11 +2,12 @@ use anyhow::{anyhow, bail, Result}; // anyhow! macro and helpers
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH}; // timing helpers (general + SDL)
 
-use crate::parser::{BinOp, Expr, Pattern, Program, Stmt};
+use crate::parser::{BinOp, Expr, Pattern, Program, Stmt, TypeAnn};
 
 // Clause type aliases to keep signatures and storage readable (avoid clippy::type_complexity)
 type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
-type PatternClause = (Vec<Pattern>, Option<Expr>, Vec<Stmt>);
+// Add optional return type on pattern functions (param annotations for patterns are not yet supported)
+type PatternClause = (Vec<Pattern>, Option<Expr>, Option<TypeAnn>, Vec<Stmt>);
 
 // Built-in module registry (update when adding more modules)
 pub fn builtin_modules() -> Vec<&'static str> {
@@ -48,6 +49,17 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 env.funcs
                     .insert(name.clone(), (params.clone(), body.clone()));
             }
+            Stmt::FnDefTyped(name, params, ret_ann, body) => {
+                let p: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                env.funcs.insert(name.clone(), (p, body.clone()));
+                env.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+            }
             Stmt::FnDefGuarded(name, params, guard, body) => {
                 env.guarded_funcs.entry(name.clone()).or_default().push((
                     params.clone(),
@@ -55,10 +67,25 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                     body.clone(),
                 ));
             }
-            Stmt::FnDefPattern(name, patterns, guard, body) => {
+            Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
+                env.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+                env.guarded_funcs.entry(name.clone()).or_default().push((
+                    params.iter().map(|(n, _)| n.clone()).collect(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
                 env.pattern_funcs.entry(name.clone()).or_default().push((
                     patterns.clone(),
                     guard.clone(),
+                    ret_ann.clone(),
                     body.clone(),
                 ));
             }
@@ -81,7 +108,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
     for (fname, clauses) in &env.pattern_funcs {
         // Find all-wildcard position (all params wildcard / identifiers treated as wildcard)
         let mut wildcard_pos: Option<usize> = None;
-        for (idx, (pats, guard, _body)) in clauses.iter().enumerate() {
+        for (idx, (pats, guard, _rann, _body)) in clauses.iter().enumerate() {
             if guard.is_none()
                 && pats
                     .iter()
@@ -121,23 +148,90 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 }
             }
         }
-        let mut seen: Vec<(String, usize)> = Vec::new();
-        for (idx, (pats, guard, _)) in clauses.iter().enumerate() {
+        // Helper: structural subsumption for patterns
+        fn pat_subsumes(a: &Pattern, b: &Pattern) -> bool {
+            use Pattern::*;
+            match (a, b) {
+                (Wildcard, _) => true,
+                (Ident(_), _) => true,
+                (Int(i), Int(j)) => i == j,
+                (Bool(x), Bool(y)) => x == y,
+                (
+                    Constructor {
+                        name: n1, sub: s1, ..
+                    },
+                    Constructor {
+                        name: n2, sub: s2, ..
+                    },
+                ) => {
+                    n1 == n2
+                        && s1.len() == s2.len()
+                        && s1.iter().zip(s2.iter()).all(|(p, q)| pat_subsumes(p, q))
+                }
+                (Tuple(ts1), Tuple(ts2)) => {
+                    ts1.len() == ts2.len()
+                        && ts1.iter().zip(ts2.iter()).all(|(p, q)| pat_subsumes(p, q))
+                }
+                _ => false,
+            }
+        }
+        fn clause_subsumes(prev: &[Pattern], next: &[Pattern]) -> bool {
+            if prev.len() != next.len() {
+                return false;
+            }
+            prev.iter()
+                .zip(next.iter())
+                .all(|(a, b)| pat_subsumes(a, b))
+        }
+        let mut seen: Vec<(String, usize, Vec<Pattern>)> = Vec::new();
+        for (idx, (pats, guard, _rann, _)) in clauses.iter().enumerate() {
             if guard.is_some() {
                 continue; // Guards may differentiate runtime reachability; skip for now
             }
             let key = pats.iter().map(pat_key).collect::<Vec<_>>().join("|");
-            if let Some((_, prev_idx)) = seen.iter().find(|(k, _)| k == &key) {
+            if let Some((_, prev_idx, _)) = seen.iter().find(|(k, _, _)| k == &key) {
                 if std::env::var("TONG_NO_MATCH_WARN").is_err() {
                     eprintln!(
                         "[TONG][warn] redundant pattern function clause #{} for '{}' (covered by earlier clause #{})",
                         idx, fname, prev_idx
                     );
                 }
-            } else {
-                seen.push((key, idx));
+                continue;
             }
+            // Subsumption: if an earlier key is identical at each position or is a wildcard ('_'), treat this clause as unreachable
+            // Also, constructor-specific: a prior constructor with same name and arity subsumes identical subpattern structures.
+            let parts: Vec<String> = pats.iter().map(pat_key).collect();
+            for (prev_key, prev_idx, prev_pats) in seen.iter() {
+                let prev_parts: Vec<&str> = prev_key.split('|').collect();
+                if prev_parts.len() == parts.len() {
+                    let mut subsumes = true;
+                    for (a, b) in prev_parts.iter().zip(parts.iter()) {
+                        if *a == "_" {
+                            continue;
+                        }
+                        if *a != b {
+                            subsumes = false;
+                            break;
+                        }
+                    }
+                    if (subsumes || clause_subsumes(prev_pats, pats))
+                        && std::env::var("TONG_NO_MATCH_WARN").is_err()
+                    {
+                        eprintln!(
+                            "[TONG][warn] unreachable pattern function clause #{} for '{}' (subsumed by earlier clause #{})",
+                            idx, fname, prev_idx
+                        );
+                        break;
+                    }
+                }
+            }
+            seen.push((key, idx, pats.clone()));
         }
+    }
+
+    // Lightweight type linting for annotated code
+    for msg in lint_types(&program) {
+        eprintln!("[TONG][lint] {msg}");
     }
 
     // Execute top-level statements (import/let/assign/print)
@@ -214,11 +308,148 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 env.type_ctors.insert(type_name.clone(), names);
             }
             Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
+            Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
             _ => {}
         }
     }
 
     Ok(())
+}
+
+// Simple lint/static pass for annotated code: checks let/var annotations w/ literal RHS and typed fn returns with literal return
+pub fn lint_types(program: &Program) -> Vec<String> {
+    let mut out = Vec::new();
+    fn infer_expr_type(e: &Expr) -> Option<TypeAnn> {
+        match e {
+            Expr::Int(_) => Some(TypeAnn::Int),
+            Expr::Float(_) => Some(TypeAnn::Float),
+            Expr::Bool(_) => Some(TypeAnn::Bool),
+            Expr::Str(_) => Some(TypeAnn::Str),
+            Expr::Array(_) => Some(TypeAnn::Array),
+            _ => None,
+        }
+    }
+    for s in &program.stmts {
+        match s {
+            Stmt::LetAnn(_, ann, rhs) | Stmt::VarAnn(_, ann, rhs) => {
+                if let Some(it) = infer_expr_type(rhs) {
+                    if *ann != TypeAnn::Any && *ann != it {
+                        out.push(format!(
+                            "annotation mismatch: expected {:?}, got {:?}",
+                            ann, it
+                        ));
+                    }
+                }
+            }
+            Stmt::FnDefTyped(name, _params, Some(rann), body) => {
+                for st in body {
+                    if let Stmt::Return(e) = st {
+                        if let Some(it) = infer_expr_type(e) {
+                            if *rann != TypeAnn::Any && *rann != it {
+                                out.push(format!(
+                                    "function {} return annotation mismatch: expected {:?}, got {:?}",
+                                    name, rann, it
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::FnDefGuardedTyped(name, _params, Some(rann), _guard, body) => {
+                for st in body {
+                    if let Stmt::Return(e) = st {
+                        if let Some(it) = infer_expr_type(e) {
+                            if *rann != TypeAnn::Any && *rann != it {
+                                out.push(format!(
+                                    "function {} return annotation mismatch: expected {:?}, got {:?}",
+                                    name, rann, it
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::FnDefPattern(name, _pats, _guard, Some(rann), body) => {
+                for st in body {
+                    if let Stmt::Return(e) = st {
+                        if let Some(it) = infer_expr_type(e) {
+                            if *rann != TypeAnn::Any && *rann != it {
+                                out.push(format!(
+                                    "function {} return annotation mismatch: expected {:?}, got {:?}",
+                                    name, rann, it
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::FnDefTyped(_, _, None, _) => {}
+            _ => {}
+        }
+    }
+    // Pattern function unreachable clause lint (structural subsumption, ignoring guarded clauses)
+    use std::collections::HashMap;
+    type PatClauses = HashMap<String, Vec<(Vec<Pattern>, Option<Expr>)>>;
+    let mut pat_funcs: PatClauses = HashMap::new();
+    for s in &program.stmts {
+        if let Stmt::FnDefPattern(name, pats, guard, _rann, _body) = s {
+            pat_funcs
+                .entry(name.clone())
+                .or_default()
+                .push((pats.clone(), guard.clone()));
+        }
+    }
+    fn pat_subsumes(a: &Pattern, b: &Pattern) -> bool {
+        match (a, b) {
+            (Pattern::Wildcard, _) => true,
+            (Pattern::Ident(_), _) => true,
+            (Pattern::Int(i), Pattern::Int(j)) => i == j,
+            (Pattern::Bool(x), Pattern::Bool(y)) => x == y,
+            (
+                Pattern::Constructor {
+                    name: n1, sub: s1, ..
+                },
+                Pattern::Constructor {
+                    name: n2, sub: s2, ..
+                },
+            ) => {
+                n1 == n2
+                    && s1.len() == s2.len()
+                    && s1.iter().zip(s2.iter()).all(|(p, q)| pat_subsumes(p, q))
+            }
+            (Pattern::Tuple(ts1), Pattern::Tuple(ts2)) => {
+                ts1.len() == ts2.len()
+                    && ts1.iter().zip(ts2.iter()).all(|(p, q)| pat_subsumes(p, q))
+            }
+            _ => false,
+        }
+    }
+    fn clause_subsumes(prev: &[Pattern], next: &[Pattern]) -> bool {
+        prev.len() == next.len()
+            && prev
+                .iter()
+                .zip(next.iter())
+                .all(|(a, b)| pat_subsumes(a, b))
+    }
+    for (fname, clauses) in pat_funcs {
+        let mut seen: Vec<(Vec<Pattern>, usize)> = Vec::new();
+        for (idx, (pats, guard)) in clauses.iter().enumerate() {
+            if guard.is_some() {
+                continue;
+            }
+            for (prev_pats, prev_idx) in seen.iter() {
+                if clause_subsumes(prev_pats, pats) {
+                    out.push(format!(
+                        "unreachable pattern function clause #{} for '{}' (subsumed by earlier clause #{})",
+                        idx, fname, prev_idx
+                    ));
+                    break;
+                }
+            }
+            seen.push((pats.clone(), idx));
+        }
+    }
+    out
 }
 
 pub fn execute_with_cli(
@@ -248,6 +479,17 @@ pub fn execute_with_cli(
                 env.funcs
                     .insert(name.clone(), (params.clone(), body.clone()));
             }
+            Stmt::FnDefTyped(name, params, ret_ann, body) => {
+                let p: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                env.funcs.insert(name.clone(), (p, body.clone()));
+                env.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+            }
             Stmt::FnDefGuarded(name, params, guard, body) => {
                 env.guarded_funcs.entry(name.clone()).or_default().push((
                     params.clone(),
@@ -255,10 +497,25 @@ pub fn execute_with_cli(
                     body.clone(),
                 ));
             }
-            Stmt::FnDefPattern(name, patterns, guard, body) => {
+            Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
+                env.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+                env.guarded_funcs.entry(name.clone()).or_default().push((
+                    params.iter().map(|(n, _)| n.clone()).collect(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
                 env.pattern_funcs.entry(name.clone()).or_default().push((
                     patterns.clone(),
                     guard.clone(),
+                    ret_ann.clone(),
                     body.clone(),
                 ));
             }
@@ -273,6 +530,9 @@ pub fn execute_with_cli(
             }
             _ => {}
         }
+    }
+    for msg in lint_types(&program) {
+        eprintln!("[TONG][lint] {msg}");
     }
     for stmt in &program.stmts {
         match stmt {
@@ -347,6 +607,7 @@ pub fn execute_with_cli(
                 env.type_ctors.insert(type_name.clone(), names);
             }
             Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
+            Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
             _ => {}
         }
     }
@@ -382,8 +643,9 @@ struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
     muts_stack: Vec<HashMap<String, bool>>,  // per-scope mutability (true = mutable)
     funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
-    guarded_funcs: HashMap<String, Vec<GuardedClause>>, // guarded multi-clause
-    pattern_funcs: HashMap<String, Vec<PatternClause>>, // pattern parameter clauses
+    fn_types: HashMap<String, (Vec<Option<TypeAnn>>, Option<TypeAnn>)>, // function -> (param annotations, return)
+    guarded_funcs: HashMap<String, Vec<GuardedClause>>,                 // guarded multi-clause
+    pattern_funcs: HashMap<String, Vec<PatternClause>>,                 // pattern parameter clauses
     modules: HashMap<String, Value>,
     #[cfg(not(feature = "sdl3"))]
     sdl_frame: i64,
@@ -439,6 +701,16 @@ impl Env {
                 self.declare_var(n.clone(), v);
                 Ok(None)
             }
+            Stmt::LetAnn(n, ann, e) => {
+                let v = self.eval_expr(e.clone())?;
+                self.declare_let_typed(n.clone(), ann, v)?;
+                Ok(None)
+            }
+            Stmt::VarAnn(n, ann, e) => {
+                let v = self.eval_expr(e.clone())?;
+                self.declare_var_typed(n.clone(), ann, v)?;
+                Ok(None)
+            }
             Stmt::Assign(n, e) => {
                 let v = self.eval_expr(e.clone())?;
                 self.assign_var(n, v)?;
@@ -483,6 +755,18 @@ impl Env {
                     .insert(name.clone(), (params.clone(), body.clone()));
                 Ok(None)
             }
+            Stmt::FnDefTyped(name, params, ret_ann, body) => {
+                let plain: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                self.funcs.insert(name.clone(), (plain, body.clone()));
+                self.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+                Ok(None)
+            }
             Stmt::FnDefGuarded(name, params, guard, body) => {
                 self.guarded_funcs.entry(name.clone()).or_default().push((
                     params.clone(),
@@ -491,10 +775,29 @@ impl Env {
                 ));
                 Ok(None)
             }
-            Stmt::FnDefPattern(name, patterns, guard, body) => {
+            Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
+                let plain: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                self.funcs
+                    .insert(name.clone(), (plain.clone(), body.clone()));
+                self.fn_types.insert(
+                    name.clone(),
+                    (
+                        params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret_ann.clone(),
+                    ),
+                );
+                self.guarded_funcs.entry(name.clone()).or_default().push((
+                    plain,
+                    guard.clone(),
+                    body.clone(),
+                ));
+                Ok(None)
+            }
+            Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
                 self.pattern_funcs.entry(name.clone()).or_default().push((
                     patterns.clone(),
                     guard.clone(),
+                    ret_ann.clone(),
                     body.clone(),
                 ));
                 Ok(None)
@@ -569,6 +872,7 @@ impl Env {
             vars_stack: vec![HashMap::new()],
             muts_stack: vec![HashMap::new()],
             funcs: HashMap::new(),
+            fn_types: HashMap::new(),
             guarded_funcs: HashMap::new(),
             pattern_funcs: HashMap::new(),
             modules: HashMap::new(),
@@ -614,6 +918,16 @@ impl Env {
             mf.insert(name, true);
         }
     }
+    fn declare_let_typed(&mut self, name: String, ann: &TypeAnn, val: Value) -> Result<()> {
+        self.enforce_type(ann, &val)?;
+        self.declare_let(name, val);
+        Ok(())
+    }
+    fn declare_var_typed(&mut self, name: String, ann: &TypeAnn, val: Value) -> Result<()> {
+        self.enforce_type(ann, &val)?;
+        self.declare_var(name, val);
+        Ok(())
+    }
     fn assign_var(&mut self, name: &str, val: Value) -> Result<()> {
         // find from innermost to outermost
         for (vi, frame) in self.vars_stack.iter_mut().enumerate().rev() {
@@ -642,6 +956,27 @@ impl Env {
             }
         }
         None
+    }
+
+    fn enforce_type(&self, ann: &TypeAnn, v: &Value) -> Result<()> {
+        use TypeAnn::*;
+        let ok = match ann {
+            Any => true,
+            Int => matches!(v, Value::Int(_)),
+            Float => matches!(v, Value::Float(_)),
+            Bool => matches!(v, Value::Bool(_)),
+            Str => matches!(v, Value::Str(_)),
+            Array => matches!(v, Value::Array(_)),
+        };
+        if ok {
+            Ok(())
+        } else {
+            bail!(format!(
+                "type mismatch: expected {:?}, got {}",
+                ann,
+                format_value(v)
+            ))
+        }
     }
 
     fn eval_expr(&mut self, e: Expr) -> Result<Value> {
@@ -1584,13 +1919,25 @@ impl Env {
                 bail!("arity mismatch for {}", name);
             }
             self.push_scope();
-            for (p, a) in params.iter().zip(args.into_iter()) {
+            let ftypes = self.fn_types.get(&name).cloned();
+            for (idx, (p, a)) in params.iter().zip(args.into_iter()).enumerate() {
                 let val = self.eval_expr(a)?;
+                if let Some((param_anns, _)) = &ftypes {
+                    if let Some(Some(ann)) = param_anns.get(idx) {
+                        self.enforce_type(ann, &val)?;
+                    }
+                }
                 self.declare_let(p.clone(), val);
             }
             let ret = self.exec_block(&body)?;
             self.pop_scope();
-            Ok(ret.unwrap_or(Value::Int(0)))
+            if let Some((_, Some(ann))) = &ftypes {
+                let rv = ret.unwrap_or(Value::Int(0));
+                self.enforce_type(ann, &rv)?;
+                Ok(rv)
+            } else {
+                Ok(ret.unwrap_or(Value::Int(0)))
+            }
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
             if clauses.is_empty() {
                 bail!("no clauses for guarded function {name}");
@@ -1633,12 +1980,24 @@ impl Env {
                 bail!("arity mismatch for {}", name);
             }
             self.push_scope();
-            for (p, v) in params.iter().zip(values.into_iter()) {
+            let ftypes = self.fn_types.get(&name).cloned();
+            for (idx, (p, v)) in params.iter().zip(values.into_iter()).enumerate() {
+                if let Some((param_anns, _)) = &ftypes {
+                    if let Some(Some(ann)) = param_anns.get(idx) {
+                        self.enforce_type(ann, &v)?;
+                    }
+                }
                 self.declare_let(p.clone(), v);
             }
             let ret = self.exec_block(&body)?;
             self.pop_scope();
-            Ok(ret.unwrap_or(Value::Int(0)))
+            if let Some((_, Some(ann))) = &ftypes {
+                let rv = ret.unwrap_or(Value::Int(0));
+                self.enforce_type(ann, &rv)?;
+                Ok(rv)
+            } else {
+                Ok(ret.unwrap_or(Value::Int(0)))
+            }
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
             let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
             if arity != values.len() {
@@ -1658,11 +2017,15 @@ impl Env {
             .get(&name)
             .cloned()
             .ok_or_else(|| anyhow!(format!("unknown pattern function {name}")))?;
-        for (patterns, guard, body) in clauses.into_iter() {
+        let mut ret_ann: Option<TypeAnn> = None;
+        for (patterns, guard, rann, body) in clauses.into_iter() {
+            if ret_ann.is_none() {
+                ret_ann = rann.clone();
+            }
             if patterns.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
-            self.vars_stack.push(HashMap::new());
+            self.push_scope();
             let mut all_match = true;
             for (p, v) in patterns.iter().zip(values.iter()) {
                 if !self.match_pattern(p, v)? {
@@ -1678,11 +2041,15 @@ impl Env {
                 };
                 if guard_ok {
                     let ret = self.exec_block(&body)?;
-                    self.vars_stack.pop();
-                    return Ok(ret.unwrap_or(Value::Int(0)));
+                    self.pop_scope();
+                    let rv = ret.unwrap_or(Value::Int(0));
+                    if let Some(ann) = &ret_ann {
+                        self.enforce_type(ann, &rv)?;
+                    }
+                    return Ok(rv);
                 }
             }
-            self.vars_stack.pop();
+            self.pop_scope();
         }
         bail!("no pattern clause matched for {name}")
     }
@@ -1693,12 +2060,18 @@ impl Env {
             .get(&name)
             .cloned()
             .ok_or_else(|| anyhow!(format!("unknown guarded function {name}")))?;
+        let ftypes = self.fn_types.get(&name).cloned();
         for (params, guard_expr, body) in clauses.into_iter() {
             if params.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
             self.push_scope();
-            for (p, v) in params.iter().zip(values.iter()) {
+            for (idx, (p, v)) in params.iter().zip(values.iter()).enumerate() {
+                if let Some((param_anns, _)) = &ftypes {
+                    if let Some(Some(ann)) = param_anns.get(idx) {
+                        self.enforce_type(ann, v)?;
+                    }
+                }
                 self.declare_let(p.clone(), v.clone());
             }
             let gv = self.eval_expr(guard_expr.clone())?;
@@ -1706,7 +2079,11 @@ impl Env {
             if pass {
                 let ret = self.exec_block(&body)?;
                 self.pop_scope();
-                return Ok(ret.unwrap_or(Value::Int(0)));
+                let rv = ret.unwrap_or(Value::Int(0));
+                if let Some((_, Some(ann))) = &ftypes {
+                    self.enforce_type(ann, &rv)?;
+                }
+                return Ok(rv);
             }
             self.pop_scope();
         }
@@ -2043,6 +2420,9 @@ impl Env {
         }
     }
 }
+
+// tests moved to end of file to avoid clippy::items-after-test-module
+// removed duplicate tests module (kept single module at EOF)
 
 impl Env {
     fn import_linalg(&mut self) -> Value {
@@ -2427,13 +2807,36 @@ impl Repl {
                         .or_default()
                         .push((params.clone(), guard.clone(), body.clone()));
                 }
-                Stmt::FnDefPattern(name, patterns, guard, body) => {
+                Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
+                    self.env.fn_types.insert(
+                        name.clone(),
+                        (
+                            params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret_ann.clone(),
+                        ),
+                    );
+                    self.env
+                        .guarded_funcs
+                        .entry(name.clone())
+                        .or_default()
+                        .push((
+                            params.iter().map(|(n, _)| n.clone()).collect(),
+                            guard.clone(),
+                            body.clone(),
+                        ));
+                }
+                Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
                     // Append pattern clause maintaining order of entry across snippets
                     self.env
                         .pattern_funcs
                         .entry(name.clone())
                         .or_default()
-                        .push((patterns.clone(), guard.clone(), body.clone()));
+                        .push((
+                            patterns.clone(),
+                            guard.clone(),
+                            ret_ann.clone(),
+                            body.clone(),
+                        ));
                 }
                 Stmt::FnMain(body) => {
                     self.env
@@ -2725,5 +3128,134 @@ impl Value {
             Value::Int(i) => Ok(*i as i32),
             _ => bail!("expected int"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+    use crate::parser::parse as parse_prog;
+
+    fn run(src: &str) -> Result<Vec<String>> {
+        let tokens = lex(src)?;
+        let program = parse_prog(tokens)?;
+        let mut env = Env::new();
+        for s in &program.stmts {
+            match s {
+                Stmt::FnDef(name, params, body) => {
+                    env.funcs
+                        .insert(name.clone(), (params.clone(), body.clone()));
+                }
+                Stmt::FnDefTyped(name, params, ret_ann, body) => {
+                    let p: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                    env.funcs.insert(name.clone(), (p, body.clone()));
+                    env.fn_types.insert(
+                        name.clone(),
+                        (
+                            params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret_ann.clone(),
+                        ),
+                    );
+                }
+                Stmt::FnDefGuarded(name, params, guard, body) => {
+                    env.guarded_funcs.entry(name.clone()).or_default().push((
+                        params.clone(),
+                        guard.clone(),
+                        body.clone(),
+                    ));
+                }
+                Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
+                    env.fn_types.insert(
+                        name.clone(),
+                        (
+                            params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret_ann.clone(),
+                        ),
+                    );
+                    env.guarded_funcs.entry(name.clone()).or_default().push((
+                        params.iter().map(|(n, _)| n.clone()).collect(),
+                        guard.clone(),
+                        body.clone(),
+                    ));
+                }
+                Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
+                    env.pattern_funcs.entry(name.clone()).or_default().push((
+                        patterns.clone(),
+                        guard.clone(),
+                        ret_ann.clone(),
+                        body.clone(),
+                    ));
+                }
+                Stmt::DataDecl(type_name, ctors) => {
+                    let mut names = Vec::new();
+                    for c in ctors {
+                        env.data_ctors.insert(c.name.clone(), c.arity);
+                        names.push(c.name.clone());
+                        env.ctor_type.insert(c.name.clone(), type_name.clone());
+                    }
+                    env.type_ctors.insert(type_name.clone(), names);
+                }
+                _ => {}
+            }
+        }
+        let mut outputs = Vec::new();
+        for s in &program.stmts {
+            match s {
+                Stmt::Print(args) => {
+                    let parts: Result<Vec<String>> = args
+                        .iter()
+                        .cloned()
+                        .map(|e| env.eval_expr(e).map(|v| format_value(&v)))
+                        .collect();
+                    outputs.push(parts?.join(" "));
+                }
+                Stmt::Expr(e) => {
+                    let v = env.eval_expr(e.clone())?;
+                    outputs.push(format_value(&v));
+                }
+                _ => {
+                    let _ = env.exec_stmt(s)?;
+                }
+            }
+        }
+        Ok(outputs)
+    }
+
+    #[test]
+    fn pattern_fn_ctors_basic_and_guarded() {
+        let src = r#"
+data Maybe = Just x | Nothing
+
+def getOrZero(Just x) -> Int { x }
+def getOrZero(Nothing) -> Int { 0 }
+
+def safeHead(Just x) if x > 0 { x }
+def safeHead(Just x) if x <= 0 { 0 }
+def safeHead(Nothing) { 0 }
+
+print(getOrZero(Just(7)))
+print(getOrZero(Nothing))
+print(safeHead(Just(5)))
+print(safeHead(Just(0)))
+print(safeHead(Nothing))
+"#;
+        let out = run(src).expect("program should run");
+        assert_eq!(out, vec!["7", "0", "5", "0", "0"]);
+    }
+
+    #[test]
+    fn pattern_fn_nested_constructors() {
+        let src = r#"
+data List = Cons head tail | Nil
+
+def list_len(Cons _ t) -> Int { 1 + list_len(t) }
+def list_len(Nil) -> Int { 0 }
+
+let l = Cons(1, Cons(2, Cons(3, Nil)))
+print(list_len(l))
+"#;
+        let out = run(src).expect("program should run");
+        assert_eq!(out, vec!["3"]);
     }
 }

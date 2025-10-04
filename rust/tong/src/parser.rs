@@ -51,6 +51,16 @@ pub enum Expr {
     Block(Vec<Stmt>), // block expression used for anonymous fn bodies / explicit blocks
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeAnn {
+    Int,
+    Float,
+    Bool,
+    Str,
+    Array,
+    Any,
+}
+
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Wildcard,
@@ -69,14 +79,38 @@ pub enum Pattern {
 pub enum Stmt {
     Let(String, Expr),
     Var(String, Expr),
+    LetAnn(String, TypeAnn, Expr),
+    VarAnn(String, TypeAnn, Expr),
     LetTuple(Vec<String>, Expr),
     Assign(String, Expr),
     ArrayAssign(String, Expr, Expr), // name[index] = value
     Print(Vec<Expr>),
     FnMain(Vec<Stmt>),
     FnDef(String, Vec<String>, Vec<Stmt>),
+    // Function with optional parameter and return type annotations (only for simple identifier params)
+    FnDefTyped(
+        String,
+        Vec<(String, Option<TypeAnn>)>,
+        Option<TypeAnn>,
+        Vec<Stmt>,
+    ),
     FnDefGuarded(String, Vec<String>, Expr, Vec<Stmt>),
-    FnDefPattern(String, Vec<Pattern>, Option<Expr>, Vec<Stmt>), // pattern parameters with optional guard
+    // Guarded function with optional parameter and return annotations (simple identifier params only)
+    FnDefGuardedTyped(
+        String,
+        Vec<(String, Option<TypeAnn>)>,
+        Option<TypeAnn>,
+        Expr,
+        Vec<Stmt>,
+    ),
+    // pattern parameters with optional guard; may include return annotation (no per-parameter annotations yet)
+    FnDefPattern(
+        String,
+        Vec<Pattern>,
+        Option<Expr>,
+        Option<TypeAnn>,
+        Vec<Stmt>,
+    ),
     Import(String, String),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
@@ -92,13 +126,17 @@ impl Stmt {
         match self {
             Stmt::Let(..) => "Let",
             Stmt::Var(..) => "Var",
+            Stmt::LetAnn(..) => "LetAnn",
+            Stmt::VarAnn(..) => "VarAnn",
             Stmt::LetTuple(..) => "LetTuple",
             Stmt::Assign(..) => "Assign",
             Stmt::ArrayAssign(..) => "ArrayAssign",
             Stmt::Print(..) => "Print",
             Stmt::FnMain(..) => "FnMain",
             Stmt::FnDef(..) => "FnDef",
+            Stmt::FnDefTyped(..) => "FnDefTyped",
             Stmt::FnDefGuarded(..) => "FnDefGuarded",
+            Stmt::FnDefGuardedTyped(..) => "FnDefGuardedTyped",
             Stmt::FnDefPattern(..) => "FnDefPattern",
             Stmt::Import(..) => "Import",
             Stmt::Return(..) => "Return",
@@ -149,6 +187,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Program> {
         tokens,
         pos: 0,
         known_ctors: std::collections::HashMap::new(),
+        stop_at_pipe: false,
     };
     p.parse_program()
 }
@@ -157,9 +196,31 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     known_ctors: std::collections::HashMap<String, usize>, // constructor name -> arity
+    // When true, '|' should not be consumed as bitwise OR while parsing an expression
+    // so outer constructs (like list comprehensions) can detect it.
+    stop_at_pipe: bool,
 }
 
 impl Parser {
+    fn parse_type(&mut self) -> Result<TypeAnn> {
+        if !self.peek_is(TokenKind::Ident) {
+            bail!("expected type identifier after ':'");
+        }
+        let ty = self.peek_text().to_string();
+        self.bump();
+        Ok(match ty.as_str() {
+            "Int" => TypeAnn::Int,
+            "Float" => TypeAnn::Float,
+            "Bool" => TypeAnn::Bool,
+            "Str" => TypeAnn::Str,
+            "Array" => TypeAnn::Array,
+            "Any" | "Dynamic" => TypeAnn::Any,
+            _ => bail!(format!(
+                "unknown type '{}'; expected Int, Float, Bool, Str, Array, Any",
+                ty
+            )),
+        })
+    }
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -242,52 +303,96 @@ impl Parser {
         }
         self.eat(TokenKind::RParen)?;
         let mut simple_idents: Vec<String> = Vec::new();
+        let mut typed_params: Vec<(String, Option<TypeAnn>)> = Vec::new();
         let mut patterns: Vec<Pattern> = Vec::new();
         let mut all_simple = true;
         for (s, e) in &raw_params {
             if s == e {
                 continue;
             }
-            if *e - *s == 1 {
-                if let Some(tok) = self.tokens.get(*s) {
-                    if tok.kind == TokenKind::Ident && tok.text != "_" {
-                        // Prefer semantic detection: is token a known zero-arity constructor? Fallback heuristic.
-                        let text = &tok.text;
-                        let semantic_ctor =
-                            self.known_ctors.get(text).copied().unwrap_or(usize::MAX) == 0;
-                        let heuristic_ctor = text.len() > 1
-                            && text
-                                .chars()
-                                .next()
-                                .map(|c| c.is_uppercase())
-                                .unwrap_or(false);
-                        let is_ctor_like = semantic_ctor || heuristic_ctor;
-                        if is_ctor_like {
-                            all_simple = false; // force pattern function path
-                            patterns.push(Pattern::Constructor {
-                                name: tok.text.clone(),
-                                arity: 0,
-                                sub: Vec::new(),
-                            });
-                            continue;
-                        } else {
-                            simple_idents.push(tok.text.clone());
-                            patterns.push(Pattern::Ident(tok.text.clone()));
-                            continue;
-                        }
-                    }
-                }
-            }
-            // Complex or non-simple param: parse as pattern
-            all_simple = false;
+            // Try to parse as simple identifier with optional type annotation
             let slice = self.tokens[*s..*e].to_vec();
             let mut sub = Parser {
                 tokens: slice,
                 pos: 0,
                 known_ctors: self.known_ctors.clone(),
+                stop_at_pipe: false,
             };
-            let pat = sub.parse_pattern()?; // reuse pattern parser
-            patterns.push(pat);
+            if sub.peek_is(TokenKind::Ident) {
+                // If identifier looks like a constructor or part of a constructor pattern,
+                // parse the entire slice as a pattern to capture arity and subpatterns correctly.
+                let ident_text = sub.peek_text();
+                let semantic_ctor_arity = self.known_ctors.get(&ident_text).copied();
+                let heuristic_ctor = ident_text
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false);
+                // Treat as constructor pattern only if it's a known constructor, or an uppercase identifier with explicit pattern shape (like '(')
+                // or there are additional tokens in the slice (e.g., Node left right). A lone uppercase identifier should still be a simple param.
+                let ctor_like = if semantic_ctor_arity.is_some() {
+                    true
+                } else if heuristic_ctor {
+                    sub.peek_n_is(1, TokenKind::LParen) || (e - s) > 1
+                } else {
+                    false
+                };
+                if ctor_like {
+                    all_simple = false;
+                    let slice2 = self.tokens[*s..*e].to_vec();
+                    let mut sub2 = Parser {
+                        tokens: slice2,
+                        pos: 0,
+                        known_ctors: self.known_ctors.clone(),
+                        stop_at_pipe: false,
+                    };
+                    let pat = sub2.parse_pattern()?;
+                    patterns.push(pat);
+                    continue;
+                }
+                let pname = sub.eat_ident()?;
+                let mut ann: Option<TypeAnn> = None;
+                if sub.peek_is(TokenKind::Colon) {
+                    sub.bump();
+                    ann = Some(sub.parse_type()?);
+                }
+                // ensure no trailing tokens; otherwise treat as pattern
+                if sub.peek().is_some() {
+                    all_simple = false;
+                    // fallback to pattern parse
+                    let slice2 = self.tokens[*s..*e].to_vec();
+                    let mut sub2 = Parser {
+                        tokens: slice2,
+                        pos: 0,
+                        known_ctors: self.known_ctors.clone(),
+                        stop_at_pipe: false,
+                    };
+                    let pat = sub2.parse_pattern()?;
+                    patterns.push(pat);
+                } else {
+                    simple_idents.push(pname.clone());
+                    typed_params.push((pname.clone(), ann));
+                    patterns.push(Pattern::Ident(pname));
+                }
+            } else {
+                // Complex or non-simple param: parse as pattern
+                all_simple = false;
+                let slice = self.tokens[*s..*e].to_vec();
+                let mut sub = Parser {
+                    tokens: slice,
+                    pos: 0,
+                    known_ctors: self.known_ctors.clone(),
+                    stop_at_pipe: false,
+                };
+                let pat = sub.parse_pattern()?; // reuse pattern parser
+                patterns.push(pat);
+            }
+        }
+        // Optional return type annotation: -> Type (only supported for simple-id functions)
+        let mut ret_ann: Option<TypeAnn> = None;
+        if self.peek_is(TokenKind::Arrow) {
+            self.bump();
+            ret_ann = Some(self.parse_type()?);
         }
         // Optional guard
         let guard_expr = if self.peek_is(TokenKind::If) {
@@ -307,11 +412,36 @@ impl Parser {
         }
         if all_simple {
             if let Some(g) = guard_expr {
+                // If any param annotated or return annotated, emit typed guarded definition
+                let any_param_typed = typed_params.iter().any(|(_, a)| a.is_some());
+                if any_param_typed || ret_ann.is_some() {
+                    if typed_params.len() != simple_idents.len() {
+                        bail!("internal: typed params mismatch");
+                    }
+                    return Ok(Stmt::FnDefGuardedTyped(
+                        name,
+                        typed_params,
+                        ret_ann,
+                        g,
+                        body,
+                    ));
+                }
                 return Ok(Stmt::FnDefGuarded(name, simple_idents, g, body));
+            }
+            // If any param annotated or return annotated, emit typed definition
+            let any_param_typed = typed_params.iter().any(|(_, a)| a.is_some());
+            if any_param_typed || ret_ann.is_some() {
+                // Ensure typed_params length matches simple_idents length (it should)
+                if typed_params.len() != simple_idents.len() {
+                    bail!("internal: typed params mismatch");
+                }
+                return Ok(Stmt::FnDefTyped(name, typed_params, ret_ann, body));
             }
             return Ok(Stmt::FnDef(name, simple_idents, body));
         }
-        Ok(Stmt::FnDefPattern(name, patterns, guard_expr, body))
+        Ok(Stmt::FnDefPattern(
+            name, patterns, guard_expr, ret_ann, body,
+        ))
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
@@ -366,6 +496,12 @@ impl Parser {
                 return Ok(Stmt::LetTuple(names, value));
             }
             let name = self.eat_ident()?;
+            // Optional type annotation: name : Type
+            let mut ann: Option<TypeAnn> = None;
+            if self.peek_is(TokenKind::Colon) {
+                self.bump();
+                ann = Some(self.parse_type()?);
+            }
             self.eat(TokenKind::Equal)?;
             // Detect import("module")
             if self.peek_is(TokenKind::Ident) && self.peek_text() == "import" {
@@ -377,10 +513,11 @@ impl Parser {
                 return Ok(Stmt::Import(name, module));
             }
             let value = self.parse_expr()?;
-            return Ok(if is_var {
-                Stmt::Var(name, value)
-            } else {
-                Stmt::Let(name, value)
+            return Ok(match (is_var, ann) {
+                (true, Some(t)) => Stmt::VarAnn(name, t, value),
+                (false, Some(t)) => Stmt::LetAnn(name, t, value),
+                (true, None) => Stmt::Var(name, value),
+                (false, None) => Stmt::Let(name, value),
             });
         }
         if self.peek_is(TokenKind::Fn) || self.peek_is(TokenKind::Def) {
@@ -518,6 +655,9 @@ impl Parser {
     fn parse_bitwise_or(&mut self) -> Result<Expr> {
         let mut node = self.parse_bitwise_xor()?;
         while self.peek_is(TokenKind::Pipe) {
+            if self.stop_at_pipe {
+                break;
+            }
             // Make sure we are not in a lambda or list-comp context: handled in parse_atom where '|' starts lambda or follows '[' for list comp.
             // At this stage, encountering '|' here means expression-level bitwise OR.
             self.bump();
@@ -925,7 +1065,10 @@ impl Parser {
             self.eat(TokenKind::LBracket)?;
             // Detect list comprehension: [ expr | ident in expr (if expr)? ]
             if !self.peek_is(TokenKind::RBracket) {
+                let prev_flag = self.stop_at_pipe;
+                self.stop_at_pipe = true;
                 let first = self.parse_expr()?;
+                self.stop_at_pipe = prev_flag;
                 if self.peek_is(TokenKind::Pipe) {
                     self.bump();
                     // Parse one or more generators: x in xs, y in ys, ...

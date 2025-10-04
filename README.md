@@ -18,6 +18,11 @@ Looking for the language reference and practical how‑tos? Read the comprehensi
 
 - doc/user_guide/tong_user_guide.md
 
+Gradual typing (optional annotations) overview:
+
+- doc/typing_guide.md
+- See annotated examples in `examples/typed/`.
+
 ## Why the name “TONG”?
 
 We wanted a name that’s short, fun, and nerd‑accurate:

@@ -163,7 +163,7 @@ fn draw_number_left(sdl, ren, x, y, n, cell, r,g,b,a) {
 
 fn draw_number_right_justified(sdl, ren, right_x, y, n, cell, r,g,b,a) {
   let single = digit_width(cell)
-  let width = single
+  var width = single
   if n >= 10 { width = single + cell + single }
   let start_x = right_x - width
   draw_number_left(sdl, ren, start_x, y, n, cell, r,g,b,a)

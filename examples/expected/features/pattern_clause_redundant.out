@@ -1,3 +1,2 @@
-[TONG][warn] unreachable pattern function clause #3 for 'id' (preceded by all-wildcard clause #2)
-[TONG][warn] redundant pattern function clause #1 for 'id' (covered by earlier clause #0)
-5
+[TONG][lint] unreachable pattern function clause #1 for 'id' (subsumed by earlier clause #0)
+0

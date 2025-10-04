@@ -1,0 +1,22 @@
+// Demonstrates annotated guarded and pattern functions
+
+// Guarded function with annotations
+fn div_safe(a: Int, b: Int) -> Float if b != 0 {
+  return a / b
+}
+
+// Fallback untyped guarded clause (no ret ann) stays allowed
+fn div_safe(a, b) if b == 0 {
+  return 0.0
+}
+
+// Pattern functions with return annotations over a simple algebraic type
+data Maybe = Just x | Nothing
+
+def getOrZero(Just x) -> Int { x }
+def getOrZero(Nothing) -> Int { 0 }
+
+print(div_safe(10, 2))
+print(div_safe(10, 0))
+print(getOrZero(Just(7)))
+print(getOrZero(Nothing))

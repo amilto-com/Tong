@@ -28,13 +28,24 @@ If you’re new, skim Quick Start first, then use the rest as a reference.
 - [Standard library idioms](#standard-library-idioms)
 - [Error handling and diagnostics](#error-handling-and-diagnostics)
 - [Gotchas and tips](#gotchas-and-tips)
-- [Examples](#examples)
-- [Version and build](#version-and-build)
-- [Roadmap highlights](#roadmap-highlights)
+ - [Gradual typing (optional annotations)](#gradual-typing-optional-annotations)
 
 ---
-
+ - Typed examples: see `examples/typed/` and the dedicated doc `doc/typing_guide.md` for syntax and runtime behavior.
 ## Quick start
+## Gradual typing (optional annotations)
+
+Tong supports optional type annotations on let/var bindings and on simple function parameters and return types.
+
+- Binding annotations: `let x: Int = 42`, `var name: Str = "Mozza"`, `let xs: Array = [1,2]`, `let any: Any = f()`
+- Function annotations (simple parameters only): `fn add(a: Int, b: Int) -> Int { return a + b }`
+- Guarded functions: `fn f(x: Int) -> Int if x > 0 { ... }` (params + optional return)
+- Pattern functions: return annotation supported: `def head(xs) -> Int { ... }`
+- Enforced at runtime for now: arguments and returns are checked when annotated; bindings are checked on assignment.
+- A small static lint pass warns on obvious literal mismatches before running.
+- Pattern params don’t support per-parameter annotations yet; guarded functions do for simple params. Pattern and guarded functions both support an optional return annotation.
+
+Types available: `Int`, `Float`, `Bool`, `Str`, `Array`, `Any` (disables checking).
 
 - Run a file
   - tong path/to/file.tong [script-args...]

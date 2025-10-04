@@ -1,0 +1,16 @@
+// typed basics
+let x: Int = 10
+let y: Float = 3.14
+let ok: Any = x
+var name: Str = "Mozza"
+let a: Array = [1,2,3]
+
+fn add(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+fn head(xs: Array) -> Any {
+  return xs[0]
+}
+
+print([add(2,3), head([9,8,7])])

@@ -1,0 +1,6 @@
+script: examples/args_demo.tong
+argc: 0
+all: [examples/args_demo.tong]
+has --verbose: false
+mode: 
+first arg: 

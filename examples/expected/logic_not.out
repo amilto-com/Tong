@@ -1,1 +1,3 @@
-NOT1 true NOT2 false Combined false
+NOT1 true
+NOT2 false
+Combined false
