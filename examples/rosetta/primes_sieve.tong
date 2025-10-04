@@ -1,21 +1,11 @@
 // Rosetta Code: Sieve of Eratosthenes (generate primes up to N)
 fn sieve(n) {
-    // Boolean array via 0/1 integers
-    let a = []
-    // initialize
-    let i = 0
-    while i <= n {
-        // push 0 (false) for index 0..n, defaulting to prime=true later except 0/1
-        a = a  // placeholder; array push not implemented in Tong yet
-        i = i + 1
-    }
-    // Due to current Tong array limitations, implement a simple trial division fallback
-    let result = []
-    let p = 2
+    // Simple trial division fallback (array push not implemented yet)
+    var p = 2
     while p <= n {
         // check prime
-        let d = 2
-        let is_prime = true
+        var d = 2
+        var is_prime = true
         while d * d <= p {
             if p % d == 0 { is_prime = false }
             d = d + 1

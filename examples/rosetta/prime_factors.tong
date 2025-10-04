@@ -1,8 +1,8 @@
 // Rosetta Code: Prime decomposition
 // Use integer division to keep values integral
 fn idiv(n, d) {
-    let q = 0
-    let m = n
+    var q = 0
+    var m = n
     while m >= d {
         m = m - d
         q = q + 1
@@ -11,7 +11,8 @@ fn idiv(n, d) {
 }
 
 fn prime_factors(n) {
-    let d = 2
+    var n = n
+    var d = 2
     while d * d <= n {
         while n % d == 0 {
             print(d)

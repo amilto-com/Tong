@@ -70,7 +70,7 @@ fn scoring(st) if (st[2] > st[0] & !(st[2] <= st[0])) || st[2] > st[0] + 5 {
   state(st[0], st[1], 400, 300, -5, 4, st[6],
         st[7], st[8], st[9], st[10], st[11], st[12], st[13] + 1, st[14], st[15])
 }
-fn scoring(st) if st[2] >= 0 & st[2] <= st[0] { st }
+fn scoring(st) if true { st }
 
 fn apply_input(st, sdl) {
   let p1_dy = dir(sdl.key_down(sdl.K_W), sdl.key_down(sdl.K_S))
@@ -87,7 +87,7 @@ fn advance_frame(st) { state(st[0], st[1], st[2], st[3], st[4], st[5], st[6], st
 
 // iterative loop (avoid deep recursion stack overflow)
 fn game_loop(st, sdl, ren, max) {
-  let cur = st
+  var cur = st
   while cur[15] < max {
     if sdl.poll_quit() { return cur }
     if sdl.key_down(sdl.K_ESCAPE) { return cur }
@@ -110,12 +110,12 @@ fn render(st, sdl, ren) {
   sdl.fill_rect(ren, st[7], st[11], st[9], st[10], 0,255,255,255)
   sdl.fill_rect(ren, st[8], st[12], st[9], st[10], 255,0,255,255)
   // simple tally scoreboard
-  let i = 0
+  var i = 0
   while i < st[13] {
   sdl.fill_rect(ren, 380 - 20 - i*6, 20, 4, 16, 255,255,255,255)
     i = i + 1
   }
-  let j = 0
+  var j = 0
   while j < st[14] {
   sdl.fill_rect(ren, 420 + j*6, 20, 4, 16, 255,255,255,255)
     j = j + 1

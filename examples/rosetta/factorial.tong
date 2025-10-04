@@ -1,7 +1,7 @@
 // Rosetta Code: Factorial (iterative)
 fn factorial(n) {
-    let r = 1
-    let i = 2
+    var r = 1
+    var i = 2
     while i <= n {
         r = r * i
         i = i + 1
@@ -9,7 +9,7 @@ fn factorial(n) {
     return r
 }
 
-let k = 0
+var k = 0
 while k <= 10 {
     print(k, factorial(k))
     k = k + 1

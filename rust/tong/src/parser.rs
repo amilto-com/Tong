@@ -68,6 +68,7 @@ pub enum Pattern {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let(String, Expr),
+    Var(String, Expr),
     LetTuple(Vec<String>, Expr),
     Assign(String, Expr),
     ArrayAssign(String, Expr, Expr), // name[index] = value
@@ -90,6 +91,7 @@ impl Stmt {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Stmt::Let(..) => "Let",
+            Stmt::Var(..) => "Var",
             Stmt::LetTuple(..) => "LetTuple",
             Stmt::Assign(..) => "Assign",
             Stmt::ArrayAssign(..) => "ArrayAssign",
@@ -340,7 +342,13 @@ impl Parser {
         }
         // Desugar `let x = import("sdl")` into a simple Assign to a special Import expr
         if self.peek_is(TokenKind::Let) || self.peek_is(TokenKind::Var) {
-            self.bump();
+            let is_var = if self.peek_is(TokenKind::Var) {
+                self.bump();
+                true
+            } else {
+                self.bump();
+                false
+            };
             // Tuple destructuring: let (a,b,c) = expr
             if self.peek_is(TokenKind::LParen) {
                 self.eat(TokenKind::LParen)?;
@@ -369,7 +377,11 @@ impl Parser {
                 return Ok(Stmt::Import(name, module));
             }
             let value = self.parse_expr()?;
-            return Ok(Stmt::Let(name, value));
+            return Ok(if is_var {
+                Stmt::Var(name, value)
+            } else {
+                Stmt::Let(name, value)
+            });
         }
         if self.peek_is(TokenKind::Fn) || self.peek_is(TokenKind::Def) {
             return self.parse_fn();

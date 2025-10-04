@@ -149,11 +149,15 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
             }
             Stmt::Let(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
+                env.declare_let(name.clone(), v);
+            }
+            Stmt::Var(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.declare_var(name.clone(), v);
             }
             Stmt::Assign(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
+                env.assign_var(name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
                 let base = env
@@ -171,7 +175,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                             bail!("index out of bounds")
                         }
                         items[ui] = new_v;
-                        env.vars_mut().insert(name.clone(), Value::Array(items));
+                        env.assign_var(name, Value::Array(items))?;
                     }
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
@@ -184,7 +188,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                             bail!("tuple arity mismatch");
                         }
                         for (n, it) in names.iter().zip(items.into_iter()) {
-                            env.vars_mut().insert(n.clone(), it);
+                            env.declare_let(n.clone(), it);
                         }
                     }
                     _ => bail!("destructuring expects array value"),
@@ -278,11 +282,15 @@ pub fn execute_with_cli(
             }
             Stmt::Let(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
+                env.declare_let(name.clone(), v);
+            }
+            Stmt::Var(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.declare_var(name.clone(), v);
             }
             Stmt::Assign(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.vars_mut().insert(name.clone(), v);
+                env.assign_var(name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
                 let base = env
@@ -300,7 +308,7 @@ pub fn execute_with_cli(
                             bail!("index out of bounds")
                         }
                         items[ui] = new_v;
-                        env.vars_mut().insert(name.clone(), Value::Array(items));
+                        env.assign_var(name, Value::Array(items))?;
                     }
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
@@ -313,7 +321,7 @@ pub fn execute_with_cli(
                             bail!("tuple arity mismatch");
                         }
                         for (n, it) in names.iter().zip(items.into_iter()) {
-                            env.vars_mut().insert(n.clone(), it);
+                            env.declare_let(n.clone(), it);
                         }
                     }
                     _ => bail!("destructuring expects array value"),
@@ -372,6 +380,7 @@ enum Value {
 #[derive(Default)]
 struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
+    muts_stack: Vec<HashMap<String, bool>>,  // per-scope mutability (true = mutable)
     funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
     guarded_funcs: HashMap<String, Vec<GuardedClause>>, // guarded multi-clause
     pattern_funcs: HashMap<String, Vec<PatternClause>>, // pattern parameter clauses
@@ -417,17 +426,22 @@ impl Env {
         match s {
             Stmt::Import(n, m) => {
                 let v = self.import_module(m)?;
-                self.vars_mut().insert(n.clone(), v);
+                self.declare_let(n.clone(), v);
                 Ok(None)
             }
             Stmt::Let(n, e) => {
                 let v = self.eval_expr(e.clone())?;
-                self.vars_mut().insert(n.clone(), v);
+                self.declare_let(n.clone(), v);
+                Ok(None)
+            }
+            Stmt::Var(n, e) => {
+                let v = self.eval_expr(e.clone())?;
+                self.declare_var(n.clone(), v);
                 Ok(None)
             }
             Stmt::Assign(n, e) => {
                 let v = self.eval_expr(e.clone())?;
-                self.vars_mut().insert(n.clone(), v);
+                self.assign_var(n, v)?;
                 Ok(None)
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
@@ -446,7 +460,7 @@ impl Env {
                             bail!("index out of bounds")
                         }
                         items[ui] = new_v;
-                        self.vars_mut().insert(name.clone(), Value::Array(items));
+                        self.assign_var(name, Value::Array(items))?;
                         Ok(None)
                     }
                     _ => bail!("array element assignment expects array variable and int index"),
@@ -493,7 +507,7 @@ impl Env {
                             bail!("tuple arity mismatch");
                         }
                         for (n, it) in names.iter().zip(items.into_iter()) {
-                            self.vars_mut().insert(n.clone(), it);
+                            self.declare_let(n.clone(), it);
                         }
                         Ok(None)
                     }
@@ -553,6 +567,7 @@ impl Env {
     fn new() -> Self {
         Self {
             vars_stack: vec![HashMap::new()],
+            muts_stack: vec![HashMap::new()],
             funcs: HashMap::new(),
             guarded_funcs: HashMap::new(),
             pattern_funcs: HashMap::new(),
@@ -574,6 +589,51 @@ impl Env {
     }
     fn vars_mut(&mut self) -> &mut HashMap<String, Value> {
         self.vars_stack.last_mut().unwrap()
+    }
+    fn push_scope(&mut self) {
+        self.vars_stack.push(HashMap::new());
+        self.muts_stack.push(HashMap::new());
+    }
+    fn pop_scope(&mut self) {
+        self.vars_stack.pop();
+        self.muts_stack.pop();
+    }
+    fn declare_let(&mut self, name: String, val: Value) {
+        if let Some(frame) = self.vars_stack.last_mut() {
+            frame.insert(name.clone(), val);
+        }
+        if let Some(mf) = self.muts_stack.last_mut() {
+            mf.insert(name, false);
+        }
+    }
+    fn declare_var(&mut self, name: String, val: Value) {
+        if let Some(frame) = self.vars_stack.last_mut() {
+            frame.insert(name.clone(), val);
+        }
+        if let Some(mf) = self.muts_stack.last_mut() {
+            mf.insert(name, true);
+        }
+    }
+    fn assign_var(&mut self, name: &str, val: Value) -> Result<()> {
+        // find from innermost to outermost
+        for (vi, frame) in self.vars_stack.iter_mut().enumerate().rev() {
+            if frame.contains_key(name) {
+                let is_mut = self
+                    .muts_stack
+                    .get(vi)
+                    .and_then(|m| m.get(name).cloned())
+                    .unwrap_or(false);
+                if !is_mut {
+                    bail!(format!(
+                        "Cannot assign to immutable binding '{}' (use 'var' for mutable)",
+                        name
+                    ));
+                }
+                frame.insert(name.to_string(), val);
+                return Ok(());
+            }
+        }
+        bail!(format!("Undefined variable '{}'", name))
     }
     fn get_var(&self, name: &str) -> Option<Value> {
         for frame in self.vars_stack.iter().rev() {
@@ -1170,10 +1230,10 @@ impl Env {
                         Value::Array(items) => {
                             for it in items {
                                 // push new scope for each binding to avoid leaking between iterations
-                                env.vars_stack.push(HashMap::new());
-                                env.vars_mut().insert(var.clone(), it);
+                                env.push_scope();
+                                env.declare_let(var.clone(), it);
                                 eval_gens(env, gens, idx + 1, elem, pred, out)?;
-                                env.vars_stack.pop();
+                                env.pop_scope();
                             }
                             Ok(())
                         }
@@ -1188,7 +1248,7 @@ impl Env {
                 Value::Array(out)
             }
             Expr::Block(stmts) => {
-                self.vars_stack.push(HashMap::new());
+                self.push_scope();
                 let mut last: Option<Value> = None;
                 for s in stmts {
                     match self.exec_stmt(&s)? {
@@ -1204,7 +1264,7 @@ impl Env {
                         }
                     }
                 }
-                self.vars_stack.pop();
+                self.pop_scope();
                 last.unwrap_or(Value::Array(vec![]))
             }
             Expr::Match { scrutinee, arms } => {
@@ -1212,7 +1272,7 @@ impl Env {
                 self.check_match_redundancy(&arms);
                 let val = self.eval_expr(*scrutinee.clone())?;
                 for (pat, guard, body) in arms.clone() {
-                    self.vars_stack.push(HashMap::new());
+                    self.push_scope();
                     let matched = self.match_pattern(&pat, &val)?;
                     let guard_pass = if matched {
                         if let Some(g) = guard.clone() {
@@ -1225,12 +1285,12 @@ impl Env {
                     };
                     if matched && guard_pass {
                         let res = self.eval_expr(body)?;
-                        self.vars_stack.pop();
+                        self.pop_scope();
                         // crude exhaustiveness check: if no wildcard and scrutinee is a constructor with a known type, warn if uncovered ctors remain
                         self.check_match_exhaustiveness(&scrutinee, &arms)?;
                         return Ok(res);
                     }
-                    self.vars_stack.pop();
+                    self.pop_scope();
                 }
                 // no arm matched
                 eprintln!("[TONG][warn] non-exhaustive match at runtime");
@@ -1477,15 +1537,15 @@ impl Env {
         }
         // Push captured frame then a params frame
         self.vars_stack.push(captured_env);
-        self.vars_stack.push(HashMap::new());
+        self.push_scope();
         for (p, a) in params.iter().zip(args.into_iter()) {
             let val = self.eval_expr(a)?;
-            self.vars_mut().insert(p.clone(), val);
+            self.declare_let(p.clone(), val);
         }
         // Evaluate body expression
         let result = self.eval_expr(body.clone());
         // Pop frames
-        self.vars_stack.pop();
+        self.pop_scope();
         self.vars_stack.pop();
         result
     }
@@ -1502,12 +1562,12 @@ impl Env {
             bail!("arity mismatch for lambda");
         }
         self.vars_stack.push(captured_env);
-        self.vars_stack.push(HashMap::new());
+        self.push_scope();
         for (p, v) in params.iter().zip(values.into_iter()) {
-            self.vars_mut().insert(p.clone(), v);
+            self.declare_let(p.clone(), v);
         }
         let result = self.eval_expr(body.clone());
-        self.vars_stack.pop();
+        self.pop_scope();
         self.vars_stack.pop();
         result
     }
@@ -1523,13 +1583,13 @@ impl Env {
             if params.len() != args.len() {
                 bail!("arity mismatch for {}", name);
             }
-            self.vars_stack.push(HashMap::new());
+            self.push_scope();
             for (p, a) in params.iter().zip(args.into_iter()) {
                 let val = self.eval_expr(a)?;
-                self.vars_mut().insert(p.clone(), val);
+                self.declare_let(p.clone(), val);
             }
             let ret = self.exec_block(&body)?;
-            self.vars_stack.pop();
+            self.pop_scope();
             Ok(ret.unwrap_or(Value::Int(0)))
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
             if clauses.is_empty() {
@@ -1572,12 +1632,12 @@ impl Env {
             if params.len() != values.len() {
                 bail!("arity mismatch for {}", name);
             }
-            self.vars_stack.push(HashMap::new());
+            self.push_scope();
             for (p, v) in params.iter().zip(values.into_iter()) {
-                self.vars_mut().insert(p.clone(), v);
+                self.declare_let(p.clone(), v);
             }
             let ret = self.exec_block(&body)?;
-            self.vars_stack.pop();
+            self.pop_scope();
             Ok(ret.unwrap_or(Value::Int(0)))
         } else if let Some(clauses) = self.guarded_funcs.get(&name).cloned() {
             let arity = clauses.first().map(|c| c.0.len()).unwrap_or(0);
@@ -1637,18 +1697,18 @@ impl Env {
             if params.len() != values.len() {
                 bail!("arity mismatch for {name}");
             }
-            self.vars_stack.push(HashMap::new());
+            self.push_scope();
             for (p, v) in params.iter().zip(values.iter()) {
-                self.vars_mut().insert(p.clone(), v.clone());
+                self.declare_let(p.clone(), v.clone());
             }
             let gv = self.eval_expr(guard_expr.clone())?;
             let pass = matches!(gv, Value::Bool(true));
             if pass {
                 let ret = self.exec_block(&body)?;
-                self.vars_stack.pop();
+                self.pop_scope();
                 return Ok(ret.unwrap_or(Value::Int(0)));
             }
-            self.vars_stack.pop();
+            self.pop_scope();
         }
         bail!("no guard matched for {name}")
     }
@@ -1814,7 +1874,7 @@ impl Env {
         Ok(match pat {
             Pattern::Wildcard => true,
             Pattern::Ident(name) => {
-                self.vars_mut().insert(name.clone(), v.clone());
+                self.declare_let(name.clone(), v.clone());
                 true
             }
             Pattern::Int(i) => matches!(v, Value::Int(j) if j==i),

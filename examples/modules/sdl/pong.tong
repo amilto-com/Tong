@@ -145,8 +145,8 @@ fn draw_block_digit(sdl, ren, x, y, d, cell, r,g,b,a) {
 }
 
 fn draw_number_left(sdl, ren, x, y, n, cell, r,g,b,a) {
-  let tens = 0
-  let temp = n
+  var tens = 0
+  var temp = n
   while temp >= 10 {
     tens = tens + 1
     temp = temp - 10
@@ -180,29 +180,29 @@ fn main() {
 
   // Debug toggle (set to true to trace)
   let debug = false
-  let frame = 0
+  var frame = 0
 
   // Game state
-  let ball_x = 400
-  let ball_y = 300
-  let prev_x = ball_x
-  let prev_y = ball_y
-  let ball_vx = 5
-  let ball_vy = 4
+  var ball_x = 400
+  var ball_y = 300
+  var prev_x = ball_x
+  var prev_y = ball_y
+  var ball_vx = 5
+  var ball_vy = 4
   let ball_size = 12
   let pw = 15
   let ph = 80
   let p1_x = 20
   let p2_x = 800 - 20 - pw
-  let p1_y = 260
-  let p2_y = 260
-  let score1 = 0
-  let score2 = 0
+  var p1_y = 260
+  var p2_y = 260
+  var score1 = 0
+  var score2 = 0
 
   // (Per-frame scoreboard constants were originally inside the loop; restoring original naming & placement)
   // We intentionally keep them simple (t,w,h,gap,top_y) for clarity and to match pre-branch behavior.
 
-  let running = true
+  var running = true
   while running {
     if debug { print("frame", frame, "pre loop running", running) }
     // Handle quit events - check window close button first

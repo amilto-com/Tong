@@ -2,8 +2,8 @@
 // Avoid floating division by using integer halving
 fn half(n) {
     // integer division by 2 via subtraction
-    let h = 0
-    let m = n
+    var h = 0
+    var m = n
     while m > 0 {
         m = m - 2
         if m >= 0 { h = h + 1 }
@@ -12,6 +12,7 @@ fn half(n) {
 }
 
 fn collatz(n) {
+    var n = n
     while n != 1 {
         print(n)
         if n % 2 == 0 {

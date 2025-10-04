@@ -1,5 +1,7 @@
 // Rosetta Code: Greatest common divisor (Euclidean algorithm)
 fn gcd(a, b) {
+    var a = a
+    var b = b
     while b != 0 {
         let t = a % b
         a = b

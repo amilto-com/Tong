@@ -2,7 +2,7 @@
 // In the classic problem, the doors left open are perfect squares.
 // Print perfect squares up to 100.
 let n = 100
-let k = 1
+var k = 1
 while k*k <= n {
 	print(k*k)
 	k = k + 1

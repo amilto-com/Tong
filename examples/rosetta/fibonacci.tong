@@ -1,9 +1,9 @@
 // Rosetta Code: Fibonacci sequence
 fn fib(n) {
     if n <= 1 { return n }
-    let a = 0
-    let b = 1
-    let i = 2
+    var a = 0
+    var b = 1
+    var i = 2
     while i <= n {
         let t = a + b
         a = b
@@ -13,7 +13,7 @@ fn fib(n) {
     return b
 }
 
-let k = 0
+var k = 0
 while k < 10 {
     print(fib(k))
     k = k + 1

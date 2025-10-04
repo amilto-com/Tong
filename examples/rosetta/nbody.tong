@@ -6,8 +6,8 @@
 
 // Square root via Newton-Raphson iteration
 fn sqrt(x) {
-    let guess = x
-    let i = 0
+    var guess = x
+    var i = 0
     while i < 20 {
         guess = 0.5 * (guess + x / guess)
         i = i + 1
@@ -52,6 +52,25 @@ fn advance(steps, dt,
            x2, y2, z2, vx2, vy2, vz2,
            x3, y3, z3, vx3, vy3, vz3) {
     let G = 39.47841760435743  // Gravitational constant in AU^3/(yr^2*solar_mass)
+    // Make local mutable copies of positions and velocities
+    var x1 = x1
+    var y1 = y1
+    var z1 = z1
+    var vx1 = vx1
+    var vy1 = vy1
+    var vz1 = vz1
+    var x2 = x2
+    var y2 = y2
+    var z2 = z2
+    var vx2 = vx2
+    var vy2 = vy2
+    var vz2 = vz2
+    var x3 = x3
+    var y3 = y3
+    var z3 = z3
+    var vx3 = vx3
+    var vy3 = vy3
+    var vz3 = vz3
 
     // Helper to compute accelerations from positions
     fn compute_accels(x1, y1, z1, x2, y2, z2, x3, y3, z3, m1, m2, m3, G) {
@@ -94,7 +113,7 @@ fn advance(steps, dt,
         return [ax1, ay1, az1, ax2, ay2, az2, ax3, ay3, az3]
     }
 
-    let s = 0
+    var s = 0
     while s < steps {
         // Compute current accelerations
         let a = compute_accels(x1, y1, z1, x2, y2, z2, x3, y3, z3, m1, m2, m3, G)
