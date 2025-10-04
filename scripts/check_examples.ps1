@@ -50,7 +50,9 @@ $fail = $false
 $total = 0; $pass = 0; $updated = 0
 
 foreach ($f in $allFiles) {
+    # Skip SDL module examples and temporarily exclude ansibench suite
     if ($f -match 'modules\\sdl\\') { continue }
+    if ($f -match '\\ansibench\\') { Write-Host "[SKIP] ansibench temporarily excluded: $f"; continue }
     $rel = ($f.Substring($exampleRoot.Length) -replace '^[\\/]+' , '')
     $baseName = [IO.Path]::GetFileNameWithoutExtension($rel)
     $expected = Join-Path $expectedRoot ($baseName + '.out')

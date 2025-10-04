@@ -254,23 +254,10 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
                 env.assign_var(name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
-                let base = env
-                    .get_var(name)
-                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
                 let idx_v = env.eval_expr(idx_expr.clone())?;
                 let new_v = env.eval_expr(val_expr.clone())?;
-                match (base, idx_v) {
-                    (Value::Array(mut items), Value::Int(i)) => {
-                        if i < 0 {
-                            bail!("negative index")
-                        }
-                        let ui = i as usize;
-                        if ui >= items.len() {
-                            bail!("index out of bounds")
-                        }
-                        items[ui] = new_v;
-                        env.assign_var(name, Value::Array(items))?;
-                    }
+                match idx_v {
+                    Value::Int(i) => env.array_assign(name, i, new_v)?,
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
             }
@@ -309,6 +296,10 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
             }
             Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
             Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
+            // Allow control-flow at top-level
+            Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
+                let _ = env.exec_stmt(stmt)?;
+            }
             _ => {}
         }
     }
@@ -553,23 +544,10 @@ pub fn execute_with_cli(
                 env.assign_var(name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
-                let base = env
-                    .get_var(name)
-                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
                 let idx_v = env.eval_expr(idx_expr.clone())?;
                 let new_v = env.eval_expr(val_expr.clone())?;
-                match (base, idx_v) {
-                    (Value::Array(mut items), Value::Int(i)) => {
-                        if i < 0 {
-                            bail!("negative index")
-                        }
-                        let ui = i as usize;
-                        if ui >= items.len() {
-                            bail!("index out of bounds")
-                        }
-                        items[ui] = new_v;
-                        env.assign_var(name, Value::Array(items))?;
-                    }
+                match idx_v {
+                    Value::Int(i) => env.array_assign(name, i, new_v)?,
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
             }
@@ -608,6 +586,9 @@ pub fn execute_with_cli(
             }
             Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
             Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
+            Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
+                let _ = env.exec_stmt(stmt)?;
+            }
             _ => {}
         }
     }
@@ -661,6 +642,42 @@ struct Env {
 }
 
 impl Env {
+    // In-place array element assignment for mutable (var) arrays.
+    // If the variable is mutable and holds an Array, update the element at idx.
+    // Errors on immutability, negative or OOB index, or non-array value.
+    fn array_assign(&mut self, name: &str, idx: i64, val: Value) -> Result<()> {
+        if idx < 0 {
+            bail!("negative index")
+        }
+        // find from innermost to outermost
+        for (vi, frame) in self.vars_stack.iter_mut().enumerate().rev() {
+            if let Some(slot) = frame.get_mut(name) {
+                let is_mut = self
+                    .muts_stack
+                    .get(vi)
+                    .and_then(|m| m.get(name).cloned())
+                    .unwrap_or(false);
+                if !is_mut {
+                    bail!(format!(
+                        "Cannot assign to immutable binding '{}' (use 'var' for mutable)",
+                        name
+                    ));
+                }
+                match slot {
+                    Value::Array(items) => {
+                        let ui = idx as usize;
+                        if ui >= items.len() {
+                            bail!("index out of bounds")
+                        }
+                        items[ui] = val;
+                        return Ok(());
+                    }
+                    _ => bail!("array element assignment expects array variable"),
+                }
+            }
+        }
+        bail!(format!("Undefined variable '{}'", name))
+    }
     // Execute a sequence of statements. Return Some(value) if a Return was hit.
     fn exec_block(&mut self, block: &[Stmt]) -> Result<Option<Value>> {
         let mut last_expr: Option<Value> = None;
@@ -717,25 +734,13 @@ impl Env {
                 Ok(None)
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
-                let base = self
-                    .get_var(name)
-                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
                 let idx_v = self.eval_expr(idx_expr.clone())?;
                 let new_v = self.eval_expr(val_expr.clone())?;
-                match (base, idx_v) {
-                    (Value::Array(mut items), Value::Int(i)) => {
-                        if i < 0 {
-                            bail!("negative index")
-                        }
-                        let ui = i as usize;
-                        if ui >= items.len() {
-                            bail!("index out of bounds")
-                        }
-                        items[ui] = new_v;
-                        self.assign_var(name, Value::Array(items))?;
-                        Ok(None)
-                    }
-                    _ => bail!("array element assignment expects array variable and int index"),
+                if let Value::Int(i) = idx_v {
+                    self.array_assign(name, i, new_v)?;
+                    Ok(None)
+                } else {
+                    bail!("array element assignment expects array variable and int index")
                 }
             }
             Stmt::Print(args) => {

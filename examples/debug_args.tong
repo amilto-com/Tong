@@ -1,0 +1,7 @@
+let args = import("args")
+print("len=", args.len())
+var i = 0
+while i < args.len() {
+	print("arg[", i, "]=", args.get(i))
+	i = i + 1
+}

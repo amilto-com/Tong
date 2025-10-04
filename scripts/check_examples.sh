@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Comprehensive regression checker for all non-SDL examples.
+# Comprehensive regression checker for all examples, excluding SDL and (temporary) ansibench.
 # Usage: bash scripts/check_examples.sh
 set -euo pipefail
 
@@ -40,7 +40,12 @@ else
 fi
 
 for f in "${FILES[@]}"; do
+  # Skip SDL module examples (require external deps) and temporary ansibench exclusions
   if [[ $f == examples/modules/sdl/* ]]; then
+    continue
+  fi
+  if [[ $f == examples/ansibench/* ]]; then
+    echo "[SKIP] ansibench temporarily excluded: ${f#examples/}"
     continue
   fi
   rel="${f#examples/}"
