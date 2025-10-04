@@ -196,7 +196,7 @@ fn run_once(loopstart, continuous_flag) {
 }
 
 // Main entry: parse args and run
-let default_loop = 1000
+let default_loop = 1000000
 var loopstart = default_loop
 var continuous = false
 
