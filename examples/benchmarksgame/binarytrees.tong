@@ -1,0 +1,57 @@
+// The Computer Language Benchmarks Game
+// https://benchmarksgame-team.pages.debian.net/benchmarksgame/
+// binarytrees in Tong (array-based nodes: [item, left, right], leaf is null left/right)
+
+let args = import("args")
+
+fn make_tree(item, depth) {
+    if depth <= 0 { return [item, [], []] }
+    let i = item
+    let d = depth - 1
+    let left = make_tree(2*i - 1, d)
+    let right = make_tree(2*i, d)
+    return [item, left, right]
+}
+
+fn is_leaf(node) { len(node[1]) == 0 && len(node[2]) == 0 }
+
+fn check_sum(tree) {
+    let item = tree[0]
+    if is_leaf(tree) { return item }
+    let left = tree[1]
+    let right = tree[2]
+    item + check_sum(left) - check_sum(right)
+}
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 10 }
+    }
+    let minDepth = 4
+    var maxDepth = minDepth + 2
+    if n > (minDepth + 2) { maxDepth = n }
+
+    let stretchDepth = maxDepth + 1
+    let c = check_sum(make_tree(0, stretchDepth))
+    print("stretch tree of depth ", stretchDepth, "\t check: ", c)
+
+    let longLivedTree = make_tree(0, maxDepth)
+
+    var d = minDepth
+    while d <= maxDepth {
+        var i = 1
+        let iters = 1 << (maxDepth - d + 1)
+        var chk = 0
+        while i <= iters {
+            chk = chk + check_sum(make_tree(i, d)) + check_sum(make_tree(-i, d))
+            i = i + 1
+        }
+    print((iters*2), "\t trees of depth ", d, "\t check: ", chk)
+        d = d + 2
+    }
+    print("long lived tree of depth ", maxDepth, "\t check: ", check_sum(longLivedTree))
+}
+
+main()

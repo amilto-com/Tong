@@ -1,0 +1,57 @@
+// The Computer Language Benchmarks Game
+// mandelbrot in Tong
+let args = import("args")
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 200 }
+    }
+    // PPM header
+    print("P4\n", n, " ", n)
+    let limit = 50
+    let invN = 2.0 / n
+    var y = 0
+    while y < n {
+        var x = 0
+        var line = ""
+        var bits = 0
+        var accu = 0
+        while x < n {
+            let Cr = x * invN - 1.5
+            let Ci = y * invN - 1.0
+            var Zr = 0.0
+            var Zi = 0.0
+            var i = 0
+            var zr2 = 0.0
+            var zi2 = 0.0
+            while i < limit && (zr2 + zi2) <= 4.0 {
+                Zi = 2.0 * Zr * Zi + Ci
+                Zr = zr2 - zi2 + Cr
+                zr2 = Zr * Zr
+                zi2 = Zi * Zi
+                i = i + 1
+            }
+            accu = (accu << 1) | (if (zr2 + zi2) <= 4.0 { 1 } else { 0 })
+            bits = bits + 1
+            if bits == 8 {
+                // output as a byte via char
+                // Note: Tong prints strings; here we approximate by accumulating char codes into a line string.
+                // For simplicity, print '0' or '\u0000' is not supported directly; use textual fallback '0'/'\xFF'.
+                line = line + (if accu == 0 { "\x00" } else { "\xFF" })
+                bits = 0
+                accu = 0
+            }
+            x = x + 1
+        }
+        if bits != 0 {
+            accu = accu << (8 - bits)
+            line = line + (if accu == 0 { "\x00" } else { "\xFF" })
+        }
+        print(line)
+        y = y + 1
+    }
+}
+
+main()

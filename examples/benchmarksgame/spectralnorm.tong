@@ -1,0 +1,76 @@
+// The Computer Language Benchmarks Game
+// spectralnorm in Tong
+let args = import("args")
+
+fn A(i, j) { 1.0 / (((i + j) * (i + j + 1) / 2) + i + 1) }
+
+fn Au(u, n) {
+    var i = 0
+    var v = []
+    while i < n {
+        var t = 0.0
+        var j = 0
+        while j < n {
+            t = t + A(i, j) * u[j]
+            j = j + 1
+        }
+        v = v + [t]
+        i = i + 1
+    }
+    v
+}
+
+fn Atu(u, n) {
+    var i = 0
+    var v = []
+    while i < n {
+        var t = 0.0
+        var j = 0
+        while j < n {
+            t = t + A(j, i) * u[j]
+            j = j + 1
+        }
+        v = v + [t]
+        i = i + 1
+    }
+    v
+}
+
+fn AtAu(u, n) { Atu(Au(u, n), n) }
+
+fn dot(x, y) {
+    var s = 0.0
+    var i = 0
+    while i < len(x) {
+        s = s + x[i] * y[i]
+        i = i + 1
+    }
+    s
+}
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 100 }
+    }
+    var u = []
+    var i = 0
+    while i < n { u = u + [1.0]; i = i + 1 }
+    var v = []
+    i = 0
+    while i < n { v = v + [0.0]; i = i + 1 }
+
+    var k = 0
+    while k < 10 {
+        v = AtAu(u, n)
+        u = AtAu(v, n)
+        k = k + 1
+    }
+    let vBv = dot(u, v)
+    let vv = dot(v, v)
+    let res = sqrt(vBv / vv)
+    print(res)
+}
+
+main()

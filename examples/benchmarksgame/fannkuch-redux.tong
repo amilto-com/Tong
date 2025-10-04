@@ -1,0 +1,75 @@
+// The Computer Language Benchmarks Game
+// fannkuch-redux in Tong
+let args = import("args")
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 7 }
+    }
+    var perm = []
+    var perm1 = map(range(n), |j| j)
+    var count = map(range(n), |j| 0)
+    var i = 0
+    var maxFlipsCount = 0
+    var checksum = 0
+    var r = n
+    while true {
+        while r != 1 {
+            count[r-1] = r
+            r = r - 1
+        }
+        // copy perm1 -> perm
+        i = 0
+        perm = map(range(n), |j| perm1[j])
+        var flipsCount = 0
+        var k = perm[0]
+        while k != 0 {
+            // flip 0..k
+            var lo = 0
+            var hi = k
+            while lo < hi {
+                let t = perm[lo]
+                perm[lo] = perm[hi]
+                perm[hi] = t
+                lo = lo + 1
+                hi = hi - 1
+            }
+            flipsCount = flipsCount + 1
+            k = perm[0]
+        }
+        if flipsCount > maxFlipsCount {
+            maxFlipsCount = flipsCount
+        }
+        if (n % 2) == 0 {
+            checksum = checksum + flipsCount
+        } else {
+            checksum = checksum - flipsCount
+        }
+        // generate next perm (no 'break' keyword; use a flag)
+        var next_ready = false
+        while next_ready == false {
+            if r == n {
+                print(checksum, "\nPfannkuchen(", n, ") = ", maxFlipsCount)
+                return 0
+            }
+            let perm0 = perm1[0]
+            i = 0
+            while i < r-1 {
+                perm1[i] = perm1[i+1]
+                i = i + 1
+            }
+            perm1[r-1] = perm0
+            count[r-1] = count[r-1] - 1
+            if count[r-1] > 0 {
+                next_ready = true
+            } else {
+                r = r + 1
+            }
+        }
+        r = 2
+    }
+}
+
+main()

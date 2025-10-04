@@ -1,0 +1,76 @@
+// The Computer Language Benchmarks Game
+// fasta in Tong
+let args = import("args")
+
+fn repeat_fasta(hdr, alu, n) {
+    print(">", hdr)
+    let L = len(alu)
+    var i = 0
+    var line = ""
+    var p = 0
+    while i < n {
+        line = line + alu[p]
+        p = p + 1
+        if p == L { p = 0 }
+        if (len(line) == 60) {
+            print(line)
+            line = ""
+        }
+        i = i + 1
+    }
+    if len(line) > 0 { print(line) }
+}
+
+// Minimal random using LCG
+var seed = 42.0
+fn rnd() { seed = (seed * 3877.0 + 29573.0) % 139968.0; seed / 139968.0 }
+
+fn make_cumulative(probs) {
+    var s = 0.0
+    var out = []
+    var i = 0
+    while i < len(probs) {
+        s = s + probs[i][1]
+        out = out + [[probs[i][0], s]]
+        i = i + 1
+    }
+    out
+}
+
+fn random_fasta(hdr, table, n) {
+    print(">", hdr)
+    let cum = make_cumulative(table)
+    var i = 0
+    var line = ""
+    while i < n {
+        let r = rnd()
+        var j = 0
+        var ch = "A"
+        while j < len(cum) {
+            if r < cum[j][1] { ch = cum[j][0]; break }
+            j = j + 1
+        }
+        line = line + ch
+        if len(line) == 60 { print(line); line = "" }
+        i = i + 1
+    }
+    if len(line) > 0 { print(line) }
+}
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 1000 }
+    }
+    let alu = ["G","G","C","C","G","G","C","C","G","G","C","C","A","A","T","T","G","G","C","C","C","C","G","G","G","G","A","A","T","T","T","T","A","A","A","A","T","T","T","T","G","G","G","G","C","C","C","C","A","A","A","A","T","T","T","T","A","A","A","A"]
+    // Subset of tables for brevity
+    let iub = [["a",0.27],["c",0.12],["g",0.12],["t",0.27],["B",0.02],["D",0.02],["H",0.02],["K",0.02],["M",0.02],["N",0.02],["R",0.02],["S",0.02],["V",0.02],["W",0.02],["Y",0.02]]
+    let homosapiens = [["a",0.3029549426680],["c",0.1979883004921],["g",0.1975473066391],["t",0.3015094502008]]
+
+    repeat_fasta("ALU", alu, 2*n)
+    random_fasta("IUB", iub, 3*n)
+    random_fasta("Homo sapiens", homosapiens, 5*n)
+}
+
+main()
