@@ -1,0 +1,7 @@
+let args = import("args")
+var i = 0
+while i < args.len() {
+  let tok = args.get(i)
+  print("tok:", tok, "n:", args.parse_int(tok))
+  i = i + 1
+}

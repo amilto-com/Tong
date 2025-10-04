@@ -1,0 +1,5 @@
+let args = import("args")
+print("argc:", args.len())
+if args.len() > 0 {
+  print("arg0:", args.get(0))
+}

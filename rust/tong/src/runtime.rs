@@ -21,7 +21,7 @@ pub fn builtin_functions() -> Vec<&'static str> {
     let mut v = vec![
         "print", "len", "sum", "filter", "reduce", "map", "import",
         // New general-purpose helpers useful for benchmarks and C-like tasks
-        "now_ms", "sleep_ms", "range", "repeat", "sqrt", "sin", "cos", "exp", "log", "abs",
+        "now_ms", "sleep_ms", "range", "repeat", "sqrt", "sin", "cos", "atan", "exp", "log", "abs",
         "getenv",
     ];
     v.sort();
@@ -1217,6 +1217,16 @@ impl Env {
                             _ => bail!("cos expects numeric"),
                         }
                     }
+                    "atan" => {
+                        if args.len() != 1 {
+                            bail!("atan expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).atan()),
+                            Value::Float(f) => Value::Float(f.atan()),
+                            _ => bail!("atan expects numeric"),
+                        }
+                    }
                     "exp" => {
                         if args.len() != 1 {
                             bail!("exp expects 1 numeric argument");
@@ -2333,6 +2343,7 @@ impl Env {
         obj.insert("get".into(), Value::FuncRef("args_get".into()));
         obj.insert("has".into(), Value::FuncRef("args_has".into()));
         obj.insert("value".into(), Value::FuncRef("args_value".into()));
+        obj.insert("parse_int".into(), Value::FuncRef("args_parse_int".into()));
         Value::Object(obj)
     }
 
@@ -2717,6 +2728,19 @@ impl Env {
                     bail!("args.len() takes no arguments")
                 }
                 Ok(Value::Int(self.cli_args.len() as i64))
+            }
+            "args_parse_int" => {
+                if values.len() != 1 {
+                    bail!("args.parse_int(s) expects 1 string arg")
+                }
+                let s = match &values[0] {
+                    Value::Str(t) => t.clone(),
+                    _ => bail!("parse_int expects string"),
+                };
+                match s.trim().parse::<i64>() {
+                    Ok(i) => Ok(Value::Int(i)),
+                    Err(_) => Ok(Value::Int(0)),
+                }
             }
             "args_get" => {
                 if values.len() != 1 {

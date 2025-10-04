@@ -1,28 +1,217 @@
-// Whetstone-style floating-point benchmark (simplified)
-let N = 200000
+// C Converted Whetstone Double Precision Benchmark (Tong port)
+// Source: https://github.com/nfinit/ansibench/blob/master/whetstone/src/whetstone.c
+// Behavior:
+// - Accepts optional CLI args similar to C version: [-c] [loops]
+//   - "-c" enables continuous mode (repeat benchmark until interrupted)
+//   - A positive integer overrides the default loop count (1000)
+// - Prints results in the same style as the C version
 
-fn as_f64(x) { x + 0.0 }
+let args = import("args")
 
-fn kernel_trig(x) {
-    let s = sin(x)
-    let c = cos(x)
-    s + c + sqrt(abs(s*c)) + exp(s - c)
-}
+// Globals equivalent to the C code
+var T = 0.0
+var T1 = 0.0
+var T2 = 0.0
+var E1 = [0.0, 0.0, 0.0, 0.0, 0.0] // E1[0] unused; use 1..4
+var J = 0
+var K = 0
+var L = 0
 
-fn run() {
-    let i = 0
-    let acc = 0.0
-    while i < N {
-        let x = as_f64(i) * 0.0001
-        let acc = acc + kernel_trig(x)
-        let i = i + 1
+// Procedures
+fn pa() {
+    // uses and mutates global E1 (1..4 used)
+    var J = 0
+    while J < 6 {
+        E1[1] = (E1[1] + E1[2] + E1[3] - E1[4]) * T
+        E1[2] = (E1[1] + E1[2] - E1[3] + E1[4]) * T
+        E1[3] = (E1[1] - E1[2] + E1[3] + E1[4]) * T
+        E1[4] = (-E1[1] + E1[2] + E1[3] + E1[4]) / T2
+        J = J + 1
     }
-    acc
 }
 
-let t0 = now_ms()
-let res = run()
-let t1 = now_ms()
-let ms = t1 - t0
-print("whetstone_res:", res)
-print("whetstone_ms:", ms)
+fn p0() {
+    E1[1] = E1[J]
+    E1[J] = E1[K]
+    E1[K] = E1[L]
+    E1[L] = E1[J]
+}
+
+fn p3(X, Y, Zptr) {
+    // Zptr is index into E1 to store
+        var X1 = X
+        var Y1 = Y
+        X1 = T * (X1 + Y1)
+        Y1 = T * (X1 + Y1)
+        let Z = (X1 + Y1) / T2
+        E1[Zptr] = Z
+}
+
+fn run_once(loopstart, continuous_flag) {
+    // Timing: use seconds similar to C (integer seconds)
+    while true {
+        let start_ms = now_ms()
+
+    // Init benchmark globals
+        T = 0.499975
+        T1 = 0.50025
+        T2 = 2.0
+
+    // LOOP and II (outer repetitions kept 1 as in C’s default path)
+    let LOOP = loopstart
+        let II = 1
+        // Removed IILOOP label to fix parse errors
+    let N1 = 0
+    let N2 = 12 * LOOP
+    let N3 = 14 * LOOP
+    let N4 = 345 * LOOP
+    let N6 = 210 * LOOP
+    let N7 = 32 * LOOP
+    let N8 = 899 * LOOP
+    let N9 = 616 * LOOP
+    let N10 = 0
+    let N11 = 93 * LOOP
+
+    // Module 1: Simple identifiers
+        var X1 = 1.0
+        var X2 = -1.0
+        var X3 = -1.0
+        var X4 = -1.0
+        var I = 1
+    while I <= N1 {
+            X1 = (X1 + X2 + X3 - X4) * T
+            X2 = (X1 + X2 - X3 + X4) * T
+            X3 = (X1 - X2 + X3 + X4) * T
+            X4 = (-X1 + X2 + X3 + X4) * T
+            I = I + 1
+    }
+
+    // Module 2: Array elements
+        E1[1] = 1.0
+        E1[2] = -1.0
+        E1[3] = -1.0
+        E1[4] = -1.0
+        var I = 1
+    while I <= N2 {
+            E1[1] = (E1[1] + E1[2] + E1[3] - E1[4]) * T
+            E1[2] = (E1[1] + E1[2] - E1[3] + E1[4]) * T
+            E1[3] = (E1[1] - E1[2] + E1[3] + E1[4]) * T
+            E1[4] = (-E1[1] + E1[2] + E1[3] + E1[4]) * T
+            I = I + 1
+    }
+
+    // Module 3: Array as parameter
+    var I = 1
+    while I <= N3 {
+        pa()
+        I = I + 1
+    }
+
+    // Module 4: Conditional jumps
+        var J = 1
+        var I = 1
+    while I <= N4 {
+            if J == 1 { J = 2 } else { J = 3 }
+            if J > 2 { J = 0 } else { J = 1 }
+            if J < 1 { J = 1 } else { J = 0 }
+            I = I + 1
+    }
+
+    // Module 6: Integer arithmetic
+        J = 1
+        K = 2
+        L = 3
+    // Initialize E1 indices referenced (1..4 are valid)
+    var I = 1
+    while I <= N6 {
+        J = J * (K - J) * (L - K)
+        K = L * K - (L - J) * K
+        L = (L - K) * (K + J)
+        // Use 1..4 indexes; mod-map to keep in range like C’s behavior with set indices
+        E1[(L - 1) % 4 + 1] = J + K + L
+        E1[(K - 1) % 4 + 1] = J * K * L
+        I = I + 1
+    }
+
+    // Module 7: Trig functions
+        var X = 0.5
+        var Y = 0.5
+    var I = 1
+    while I <= N7 {
+            X = T * atan(T2 * sin(X) * cos(X) / (cos(X + Y) + cos(X - Y) - 1.0))
+            Y = T * atan(T2 * sin(Y) * cos(Y) / (cos(X + Y) + cos(X - Y) - 1.0))
+            I = I + 1
+    }
+
+    // Module 8: Procedure calls
+        var X = 1.0
+        var Y = 1.0
+        let Zidx = 1 // store Z at E1[1]
+    var I = 1
+    while I <= N8 {
+    p3(X, Y, Zidx)
+        I = I + 1
+    }
+
+    // Module 9: Array references via P0
+        J = 1
+        K = 2
+        L = 3
+        E1[1] = 1.0
+        E1[2] = 2.0
+        E1[3] = 3.0
+    var I = 1
+    while I <= N9 {
+    p0()
+        I = I + 1
+    }
+
+    // Module 10 omitted in C (N10=0)
+
+    // Module 11: Standard functions
+        var X = 0.75
+    var I = 1
+    while I <= N11 {
+        X = sqrt(exp(log(X) / T1))
+        I = I + 1
+    }
+
+    let end_ms = now_ms()
+    let secs = (end_ms - start_ms) / 1000
+        print("")
+    if secs <= 0 {
+        print("Insufficient duration- Increase the LOOP count")
+        if !continuous_flag { return 1 }
+    }
+    print("Loops:", LOOP, ", Iterations:", II, ", Duration:", secs, " sec.")
+    let KIPS = (100.0 * LOOP * II) / (secs + 0.0)
+    if KIPS >= 1000.0 {
+        print("C Converted Double Precision Whetstones:", KIPS / 1000.0, " MWIPS")
+    } else {
+        print("C Converted Double Precision Whetstones:", KIPS, " KWIPS")
+    }
+        if !continuous_flag { return 0 }
+    }
+    0
+}
+
+// Main entry: parse args and run
+let default_loop = 1000
+var loopstart = default_loop
+var continuous = false
+
+// Allow: whetstone.tong [-c] [loops]
+if args.has("-c") || args.has("c") { continuous = true }
+// Support: whetstone.tong loops=NNN or positional first argument NNN
+let loops_val = args.value("loops")
+if len(loops_val) > 0 {
+    let n = args.parse_int(loops_val)
+    if n > 0 { loopstart = n }
+} else {
+    if args.len() > 0 {
+        let n = args.parse_int(args.get(0))
+        if n > 0 { loopstart = n }
+    }
+}
+
+run_once(loopstart, continuous)
