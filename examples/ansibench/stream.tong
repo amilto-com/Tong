@@ -1,0 +1,127 @@
+// STREAM memory bandwidth benchmark, Tong version (semantics aligned with C reference):
+// Kernels over arrays A, B, C of length N
+// 1) Copy:  C[i] = A[i]
+// 2) Scale: B[i] = s * C[i]
+// 3) Add:   C[i] = A[i] + B[i]
+// 4) Triad: A[i] = B[i] + s * C[i]
+
+let N = 20000         // Adjust size as needed (small for interpreter)
+let NTIMES = 3        // repeats (small for speed)
+let scalar = 3.0
+
+fn init_a(n) { map(range(n), |i| 1.0) }
+fn init_b(n) { map(range(n), |i| 2.0) }
+fn init_c(n) { map(range(n), |i| 0.0) }
+
+// Kernels return a new array (functional update), then caller rebinds A/B/C
+fn kernel_copy(a) {
+    let n = len(a)
+    map(range(n), |i| a[i])
+}
+fn kernel_scale(c, s) {
+    let n = len(c)
+    map(range(n), |i| s * c[i])
+}
+fn kernel_add(a, b) {
+    let n = len(a)
+    map(range(n), |i| a[i] + b[i])
+}
+fn kernel_triad(b, c, s) {
+    let n = len(b)
+    map(range(n), |i| b[i] + s * c[i])
+}
+
+fn run_min_ms(name, thunk) {
+    let best = 1000000000
+    let i = 0
+    while i < NTIMES {
+        let t0 = now_ms()
+        thunk()
+        let t1 = now_ms()
+        let dt = t1 - t0
+        if dt < best { let best = dt }
+        let i = i + 1
+    }
+    print(name, "best_ms:", best)
+    best
+}
+
+// Initialize arrays
+let A = init_a(N)
+let B = init_b(N)
+let C = init_c(N)
+
+// Copy
+let C = kernel_copy(A)
+let best_copy = 1000000000
+let i = 0
+while i < NTIMES {
+    let t0 = now_ms()
+    let C2 = kernel_copy(A)
+    let t1 = now_ms()
+    let dt = t1 - t0
+    if dt < best_copy { let best_copy = dt }
+    let C = C2
+    let i = i + 1
+}
+let t_copy = best_copy
+// Scale
+let B = kernel_scale(C, scalar)
+let best_scale = 1000000000
+let i = 0
+while i < NTIMES {
+    let t0 = now_ms()
+    let B2 = kernel_scale(C, scalar)
+    let t1 = now_ms()
+    let dt = t1 - t0
+    if dt < best_scale { let best_scale = dt }
+    let B = B2
+    let i = i + 1
+}
+let t_scale = best_scale
+// Add
+let C = kernel_add(A, B)
+let best_add = 1000000000
+let i = 0
+while i < NTIMES {
+    let t0 = now_ms()
+    let C2 = kernel_add(A, B)
+    let t1 = now_ms()
+    let dt = t1 - t0
+    if dt < best_add { let best_add = dt }
+    let C = C2
+    let i = i + 1
+}
+let t_add = best_add
+// Triad
+let A = kernel_triad(B, C, scalar)
+let best_triad = 1000000000
+let i = 0
+while i < NTIMES {
+    let t0 = now_ms()
+    let A2 = kernel_triad(B, C, scalar)
+    let t1 = now_ms()
+    let dt = t1 - t0
+    if dt < best_triad { let best_triad = dt }
+    let A = A2
+    let i = i + 1
+}
+let t_triad = best_triad
+
+// Bytes moved per element (double-precision assumed: 8 bytes)
+let bytes_copy = 2 * N * 8      // read A, write C
+let bytes_scale = 2 * N * 8     // read C, write B
+let bytes_add = 3 * N * 8       // read A,B, write C
+let bytes_triad = 3 * N * 8     // read B,C, write A
+
+fn mbps(bytes, ms) {
+    if ms <= 0 { 0.0 } else { as_f64(bytes) / as_f64(ms) / 1000.0 }
+}
+
+// helpers to coerce number to float (Tong coerces Int->Float in ops, but make it explicit)
+fn as_f64(x) { x + 0.0 }
+
+print("MB/s copy:", mbps(bytes_copy, t_copy))
+print("MB/s scale:", mbps(bytes_scale, t_scale))
+print("MB/s add:", mbps(bytes_add, t_add))
+print("MB/s triad:", mbps(bytes_triad, t_triad))

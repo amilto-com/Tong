@@ -1,0 +1,17 @@
+// Linpack-like: small dense matmul timing using linalg module
+let n = 64
+let l = import("linalg")
+
+let A = l.ones([n, n])
+let B = l.ones([n, n])
+
+// Warm-up
+let C = l.matmul(A, B)
+
+let t0 = now_ms()
+let C2 = l.matmul(A, B)
+let t1 = now_ms()
+let ms = t1 - t0
+
+print("linpack_size:", n)
+print("linpack_ms:", ms)

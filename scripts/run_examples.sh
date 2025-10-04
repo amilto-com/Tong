@@ -12,11 +12,14 @@ shopt -s nullglob
 include_modules=false
 only_rosetta=false
 skip_sdl=false
+only_ansibench=false
+mode=""
 
 for arg in "$@"; do
   case "$arg" in
   --all) include_modules=true ;;
   --rosetta) only_rosetta=true ;;
+  --ansibench) only_ansibench=true ;;
   --skip-sdl) skip_sdl=true ;;
     -h|--help)
       cat <<EOF
@@ -25,7 +28,10 @@ Run TONG examples.
 Options:
   --all        Include module examples under examples/modules/**
   --rosetta    Run only Rosetta examples (examples/rosetta/*.tong)
+  --ansibench  Run only Ansibench examples (examples/ansibench/*.tong)
   --skip-sdl   Skip examples under examples/modules/sdl (avoid window launch)
+  --quick      Set TONG_MODE=quick to run smaller problem sizes
+  --full       Set TONG_MODE=full to run larger/standard sizes
   -h, --help   Show this help
 
 Environment:
@@ -33,6 +39,8 @@ Environment:
 EOF
       exit 0
       ;;
+    --quick) mode="quick" ;;
+    --full) mode="full" ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -63,12 +71,20 @@ if [[ ! -x "$TONG" ]]; then
 fi
 
 echo "[using] tong executable: $TONG"
+if [[ -n "$mode" ]]; then
+  export TONG_MODE="$mode"
+  echo "[mode] TONG_MODE=$TONG_MODE"
+fi
 
 examples_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../examples" && pwd)"
 
 declare -a files
 if $only_rosetta; then
   while IFS= read -r -d '' f; do files+=("$f"); done < <(find "$examples_root/rosetta" -maxdepth 1 -type f -name '*.tong' -print0 | sort -z)
+elif $only_ansibench; then
+  if [[ -d "$examples_root/ansibench" ]]; then
+    while IFS= read -r -d '' f; do files+=("$f"); done < <(find "$examples_root/ansibench" -maxdepth 1 -type f -name '*.tong' -print0 | sort -z)
+  fi
 else
   # Top-level examples first (exclude nested directories)
   while IFS= read -r -d '' f; do files+=("$f"); done < <(find "$examples_root" -maxdepth 1 -type f -name '*.tong' -print0 | sort -z)

@@ -1,0 +1,36 @@
+// CoreMark-like mixed workload (very simplified)
+let N = 200000
+
+fn list_sum(xs) {
+    reduce(xs, \a b -> a + b, 0)
+}
+
+fn state_machine(n) {
+    let s = 0
+    let i = 0
+    while i < n {
+        let s = {
+            if ((i % 3) == 0) {
+                s + 1
+            } else {
+                s - 1
+            }
+        }
+        let i = i + 1
+    }
+    s
+}
+
+fn run() {
+    let xs = map(range(1000), |i| i)
+    let a = list_sum(xs)
+    let b = state_machine(N)
+    a + b
+}
+
+let t0 = now_ms()
+let r = run()
+let t1 = now_ms()
+let ms = t1 - t0
+print("coremark_res:", r)
+print("coremark_ms:", ms)

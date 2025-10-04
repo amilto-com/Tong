@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail, Result}; // anyhow! macro and helpers
 use std::collections::HashMap;
-#[cfg(feature = "sdl3")]
-use std::time::Duration; // Duration used in sdl_delay
+use std::time::{Duration, SystemTime, UNIX_EPOCH}; // timing helpers (general + SDL)
 
 use crate::parser::{BinOp, Expr, Pattern, Program, Stmt};
 
@@ -18,7 +17,12 @@ pub fn builtin_modules() -> Vec<&'static str> {
 // Keep in sync with match arms in Expr::Call in eval_expr.
 pub fn builtin_functions() -> Vec<&'static str> {
     // print is a statement in the AST but users expect it; include for discoverability.
-    let mut v = vec!["print", "len", "sum", "filter", "reduce", "map", "import"];
+    let mut v = vec![
+        "print", "len", "sum", "filter", "reduce", "map", "import",
+        // New general-purpose helpers useful for benchmarks and C-like tasks
+        "now_ms", "sleep_ms", "range", "repeat", "sqrt", "sin", "cos", "exp", "log", "abs",
+        "getenv",
+    ];
     v.sort();
     v
 }
@@ -547,7 +551,7 @@ impl Env {
                     (Value::Array(v), Value::Int(n)) => {
                         if n < 0 {
                             bail!("negative index not supported")
-                        };
+                        }
                         let ni = n as usize;
                         v.get(ni)
                             .cloned()
@@ -577,6 +581,141 @@ impl Env {
             }
             Expr::Call { callee, args } => {
                 match callee.as_str() {
+                    "now_ms" => {
+                        if !args.is_empty() {
+                            bail!("now_ms expects 0 arguments");
+                        }
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map_err(|e| anyhow!(e))?;
+                        Value::Int(now.as_millis() as i64)
+                    }
+                    "sleep_ms" => {
+                        if args.len() != 1 {
+                            bail!("sleep_ms expects 1 argument");
+                        }
+                        let ms = self.eval_expr(args[0].clone())?;
+                        match ms {
+                            Value::Int(i) => {
+                                std::thread::sleep(Duration::from_millis(i.max(0) as u64));
+                                Value::Int(0)
+                            }
+                            _ => bail!("sleep_ms expects int milliseconds"),
+                        }
+                    }
+                    "range" => {
+                        // range(n) -> [0,1,..,n-1]; range(a,b) -> [a..b-1]
+                        if args.is_empty() || args.len() > 2 {
+                            bail!("range expects 1 or 2 integer arguments");
+                        }
+                        let (start, end) = if args.len() == 1 {
+                            match self.eval_expr(args[0].clone())? {
+                                Value::Int(n) => (0, n),
+                                _ => bail!("range expects int"),
+                            }
+                        } else {
+                            let a = match self.eval_expr(args[0].clone())? {
+                                Value::Int(n) => n,
+                                _ => bail!("range expects int"),
+                            };
+                            let b = match self.eval_expr(args[1].clone())? {
+                                Value::Int(n) => n,
+                                _ => bail!("range expects int"),
+                            };
+                            (a, b)
+                        };
+                        if end < start {
+                            Value::Array(vec![])
+                        } else {
+                            let mut v = Vec::new();
+                            let mut i = start;
+                            while i < end {
+                                v.push(Value::Int(i));
+                                i += 1;
+                            }
+                            Value::Array(v)
+                        }
+                    }
+                    "repeat" => {
+                        // repeat(x, n) -> [x, x, ..., x] n times
+                        if args.len() != 2 {
+                            bail!("repeat expects 2 arguments (value, count)");
+                        }
+                        let val = self.eval_expr(args[0].clone())?;
+                        let n = match self.eval_expr(args[1].clone())? {
+                            Value::Int(k) => k,
+                            _ => bail!("repeat count must be int"),
+                        };
+                        if n <= 0 {
+                            Value::Array(vec![])
+                        } else {
+                            let mut out = Vec::with_capacity(n as usize);
+                            for _ in 0..(n as usize) {
+                                out.push(val.clone());
+                            }
+                            Value::Array(out)
+                        }
+                    }
+                    "sqrt" => {
+                        if args.len() != 1 {
+                            bail!("sqrt expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).sqrt()),
+                            Value::Float(f) => Value::Float(f.sqrt()),
+                            _ => bail!("sqrt expects numeric"),
+                        }
+                    }
+                    "sin" => {
+                        if args.len() != 1 {
+                            bail!("sin expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).sin()),
+                            Value::Float(f) => Value::Float(f.sin()),
+                            _ => bail!("sin expects numeric"),
+                        }
+                    }
+                    "cos" => {
+                        if args.len() != 1 {
+                            bail!("cos expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).cos()),
+                            Value::Float(f) => Value::Float(f.cos()),
+                            _ => bail!("cos expects numeric"),
+                        }
+                    }
+                    "exp" => {
+                        if args.len() != 1 {
+                            bail!("exp expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).exp()),
+                            Value::Float(f) => Value::Float(f.exp()),
+                            _ => bail!("exp expects numeric"),
+                        }
+                    }
+                    "log" => {
+                        if args.len() != 1 {
+                            bail!("log expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Float((i as f64).ln()),
+                            Value::Float(f) => Value::Float(f.ln()),
+                            _ => bail!("log expects numeric"),
+                        }
+                    }
+                    "abs" => {
+                        if args.len() != 1 {
+                            bail!("abs expects 1 numeric argument");
+                        }
+                        match self.eval_expr(args[0].clone())? {
+                            Value::Int(i) => Value::Int(i.abs()),
+                            Value::Float(f) => Value::Float(f.abs()),
+                            _ => bail!("abs expects numeric"),
+                        }
+                    }
                     "len" => {
                         if args.len() != 1 {
                             bail!("len expects 1 argument");
@@ -689,6 +828,19 @@ impl Env {
                                 Value::Array(out)
                             }
                             _ => bail!("map expects array as first argument"),
+                        }
+                    }
+                    "getenv" => {
+                        if args.len() != 1 {
+                            bail!("getenv expects 1 argument (name)");
+                        }
+                        let name = match self.eval_expr(args[0].clone())? {
+                            Value::Str(s) => s,
+                            _ => bail!("getenv expects string name"),
+                        };
+                        match std::env::var(&name) {
+                            Ok(v) => Value::Str(v),
+                            Err(_) => Value::Str(String::new()),
                         }
                     }
                     _ => {
@@ -1036,7 +1188,26 @@ impl Env {
                         (Value::Int(a), Value::Float(b), BinOp::Gt) => Value::Bool((a as f64) > b),
                         (Value::Int(a), Value::Float(b), BinOp::Ge) => Value::Bool((a as f64) >= b),
 
-                        (l, r, _) => bail!("unsupported operands for operation: {:?}", (l, r)),
+                        // Bitwise ops (int-only), but allow Bool for backward-compat (non-short-circuit)
+                        (Value::Bool(a), Value::Bool(b), BinOp::BitAnd) => Value::Bool(a & b),
+                        (Value::Bool(a), Value::Bool(b), BinOp::BitOr) => Value::Bool(a | b),
+                        (Value::Bool(a), Value::Bool(b), BinOp::BitXor) => Value::Bool(a ^ b),
+                        (Value::Int(a), Value::Int(b), BinOp::BitAnd) => Value::Int(a & b),
+                        (Value::Int(a), Value::Int(b), BinOp::BitOr) => Value::Int(a | b),
+                        (Value::Int(a), Value::Int(b), BinOp::BitXor) => Value::Int(a ^ b),
+                        (Value::Int(a), Value::Int(b), BinOp::Shl) => {
+                            Value::Int(a.wrapping_shl(b as u32))
+                        }
+                        (Value::Int(a), Value::Int(b), BinOp::Shr) => {
+                            Value::Int(((a as u64) >> (b as u32)) as i64)
+                        }
+
+                        (l, r, which) => bail!(
+                            "unsupported operands for operation {:?}: {:?} and {:?}",
+                            which,
+                            l,
+                            r,
+                        ),
                     }
                 }
             }

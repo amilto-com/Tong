@@ -133,8 +133,13 @@ pub enum BinOp {
     Le,
     Gt,
     Ge,
-    And,
-    Or,
+    And,    // logical AND (&&)
+    Or,     // logical OR (||)
+    BitAnd, // &
+    BitOr,  // |
+    BitXor, // ^
+    Shl,    // <<
+    Shr,    // >>
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program> {
@@ -484,15 +489,86 @@ impl Parser {
     }
 
     fn parse_conjunction(&mut self) -> Result<Expr> {
-        let mut node = self.parse_comparison()?;
-        while self.peek_is(TokenKind::Ampersand) {
+        let mut node = self.parse_bitwise_or()?;
+        while self.peek_is(TokenKind::AndAnd) {
             self.bump();
-            let rhs = self.parse_comparison()?;
+            let rhs = self.parse_bitwise_or()?;
             node = Expr::Binary {
                 op: BinOp::And,
                 left: Box::new(node),
                 right: Box::new(rhs),
             };
+        }
+        Ok(node)
+    }
+
+    // Bitwise or has lower precedence than xor and and, but higher than logical && and || already handled above
+    fn parse_bitwise_or(&mut self) -> Result<Expr> {
+        let mut node = self.parse_bitwise_xor()?;
+        while self.peek_is(TokenKind::Pipe) {
+            // Make sure we are not in a lambda or list-comp context: handled in parse_atom where '|' starts lambda or follows '[' for list comp.
+            // At this stage, encountering '|' here means expression-level bitwise OR.
+            self.bump();
+            let rhs = self.parse_bitwise_xor()?;
+            node = Expr::Binary {
+                op: BinOp::BitOr,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<Expr> {
+        let mut node = self.parse_bitwise_and()?;
+        while self.peek_is(TokenKind::Caret) {
+            self.bump();
+            let rhs = self.parse_bitwise_and()?;
+            node = Expr::Binary {
+                op: BinOp::BitXor,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<Expr> {
+        let mut node = self.parse_shift()?;
+        while self.peek_is(TokenKind::Ampersand) {
+            self.bump();
+            let rhs = self.parse_shift()?;
+            node = Expr::Binary {
+                op: BinOp::BitAnd,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(node)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr> {
+        let mut node = self.parse_comparison()?;
+        loop {
+            if self.peek_is(TokenKind::ShiftLeft) {
+                self.bump();
+                let rhs = self.parse_comparison()?;
+                node = Expr::Binary {
+                    op: BinOp::Shl,
+                    left: Box::new(node),
+                    right: Box::new(rhs),
+                };
+            } else if self.peek_is(TokenKind::ShiftRight) {
+                self.bump();
+                let rhs = self.parse_comparison()?;
+                node = Expr::Binary {
+                    op: BinOp::Shr,
+                    left: Box::new(node),
+                    right: Box::new(rhs),
+                };
+            } else {
+                break;
+            }
         }
         Ok(node)
     }

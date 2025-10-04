@@ -1,0 +1,26 @@
+// HINT-like: harmonic integral approximation
+let N = 5000
+
+fn as_f64(x) { x + 0.0 }
+
+fn run(n) {
+    let i = 1
+    let j = 1
+    let s = 0.0
+    while i <= n {
+        let j = 1
+        while j <= n {
+            let s = s + 1.0 / (as_f64(i) + as_f64(j))
+            let j = j + 1
+        }
+        let i = i + 1
+    }
+    s
+}
+
+let t0 = now_ms()
+let r = run(N)
+let t1 = now_ms()
+let ms = t1 - t0
+print("hint_res:", r)
+print("hint_ms:", ms)

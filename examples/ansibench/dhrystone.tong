@@ -1,0 +1,32 @@
+// Dhrystone-like benchmark with mode-aware iteration count.
+// Note: This is still a simplified version but closer to C flow and includes bitwise touches.
+
+let mode = getenv("TONG_MODE")
+let ITER = { if mode == "full" { 2000000 } else { 200000 } }
+
+fn proc1(x) { x + 1 }
+fn proc2(x) { x % 7 }
+fn proc3(a, b) {
+    { if a > b { a - b } else { b - a } }
+}
+
+fn main_loop(n) {
+    let i = 0
+    let acc = 0
+    while i < n {
+        let t = proc1(i)
+        let u = proc2(t)
+        let v = proc3(t, u)
+    let acc = acc + ((t ^ u) & 65535) + v
+        let i = i + 1
+    }
+    acc
+}
+
+let t0 = now_ms()
+let res = main_loop(ITER)
+let t1 = now_ms()
+let ms = t1 - t0
+
+print("dhrystone_result:", res)
+print("dhrystone_ms:", ms)

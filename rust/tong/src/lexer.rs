@@ -66,10 +66,18 @@ pub enum TokenKind {
     Dot,
     #[token("||")]
     OrOr,
+    #[token("&&")]
+    AndAnd,
+    #[token("<<")]
+    ShiftLeft,
+    #[token(">>")]
+    ShiftRight,
     #[token("|")]
     Pipe,
     #[token("&")]
     Ampersand,
+    #[token("^")]
+    Caret,
     #[token("->")]
     Arrow,
     #[token("\\")]

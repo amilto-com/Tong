@@ -1,0 +1,22 @@
+// NBench-like integer/fixed operations with bitwise ops
+let mode = getenv("TONG_MODE")
+let N = { if mode == "full" { 3000000 } else { 500000 } }
+
+fn integer_ops(n) {
+    let i = 0
+    let s = 0
+    while i < n {
+        // Mix of arithmetic and bitwise like classic nbench
+    let t = ((i << 1) ^ (i >> 1)) & 65535
+        let s = s + (i * i - 3 * i + 7) - (i % 7) + t
+        let i = i + 1
+    }
+    s
+}
+
+let t0 = now_ms()
+let r = integer_ops(N)
+let t1 = now_ms()
+let ms = t1 - t0
+print("nbench_res:", r)
+print("nbench_ms:", ms)

@@ -1,0 +1,28 @@
+// Whetstone-style floating-point benchmark (simplified)
+let N = 200000
+
+fn as_f64(x) { x + 0.0 }
+
+fn kernel_trig(x) {
+    let s = sin(x)
+    let c = cos(x)
+    s + c + sqrt(abs(s*c)) + exp(s - c)
+}
+
+fn run() {
+    let i = 0
+    let acc = 0.0
+    while i < N {
+        let x = as_f64(i) * 0.0001
+        let acc = acc + kernel_trig(x)
+        let i = i + 1
+    }
+    acc
+}
+
+let t0 = now_ms()
+let res = run()
+let t1 = now_ms()
+let ms = t1 - t0
+print("whetstone_res:", res)
+print("whetstone_ms:", ms)
