@@ -10,7 +10,7 @@ type PatternClause = (Vec<Pattern>, Option<Expr>, Vec<Stmt>);
 
 // Built-in module registry (update when adding more modules)
 pub fn builtin_modules() -> Vec<&'static str> {
-    vec!["sdl", "linalg"]
+    vec!["sdl", "linalg", "args"]
 }
 
 // Core built-in functions (non-module) recognized directly by the evaluator.
@@ -27,6 +27,7 @@ pub fn builtin_functions() -> Vec<&'static str> {
     v
 }
 
+#[allow(dead_code)]
 pub fn execute(program: Program, debug: bool) -> Result<()> {
     let mut env = Env::new();
     env.debug = debug;
@@ -216,6 +217,134 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn execute_with_cli(
+    program: Program,
+    debug: bool,
+    script: Option<String>,
+    args: Vec<String>,
+) -> Result<()> {
+    let mut env = Env::new();
+    env.debug = debug;
+    env.cli_script = script;
+    env.cli_args = args;
+    if env.debug {
+        eprintln!(
+            "[TONG][dbg] start: {} top-level statements (with CLI)",
+            program.stmts.len()
+        );
+    }
+    // Reuse main execute logic: collect definitions and run top-level
+    // First collect function definitions
+    for (i, stmt) in program.stmts.iter().enumerate() {
+        if env.debug {
+            eprintln!("[TONG][dbg] top-level stmt #{}: {}", i, stmt.kind_name());
+        }
+        match stmt {
+            Stmt::FnDef(name, params, body) => {
+                env.funcs
+                    .insert(name.clone(), (params.clone(), body.clone()));
+            }
+            Stmt::FnDefGuarded(name, params, guard, body) => {
+                env.guarded_funcs.entry(name.clone()).or_default().push((
+                    params.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnDefPattern(name, patterns, guard, body) => {
+                env.pattern_funcs.entry(name.clone()).or_default().push((
+                    patterns.clone(),
+                    guard.clone(),
+                    body.clone(),
+                ));
+            }
+            Stmt::FnMain(body) => {
+                env.funcs
+                    .insert("main".to_string(), (Vec::new(), body.clone()));
+            }
+            Stmt::DataDecl(_, ctors) => {
+                for c in ctors {
+                    env.data_ctors.insert(c.name.clone(), c.arity);
+                }
+            }
+            _ => {}
+        }
+    }
+    for stmt in &program.stmts {
+        match stmt {
+            Stmt::Import(name, module) => {
+                let v = env.import_module(module)?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::Let(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::Assign(name, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                env.vars_mut().insert(name.clone(), v);
+            }
+            Stmt::ArrayAssign(name, idx_expr, val_expr) => {
+                let base = env
+                    .get_var(name)
+                    .ok_or_else(|| anyhow!(format!("undefined variable {}", name)))?;
+                let idx_v = env.eval_expr(idx_expr.clone())?;
+                let new_v = env.eval_expr(val_expr.clone())?;
+                match (base, idx_v) {
+                    (Value::Array(mut items), Value::Int(i)) => {
+                        if i < 0 {
+                            bail!("negative index")
+                        }
+                        let ui = i as usize;
+                        if ui >= items.len() {
+                            bail!("index out of bounds")
+                        }
+                        items[ui] = new_v;
+                        env.vars_mut().insert(name.clone(), Value::Array(items));
+                    }
+                    _ => bail!("array element assignment expects array variable and int index"),
+                }
+            }
+            Stmt::LetTuple(names, expr) => {
+                let v = env.eval_expr(expr.clone())?;
+                match v {
+                    Value::Array(items) => {
+                        if items.len() != names.len() {
+                            bail!("tuple arity mismatch");
+                        }
+                        for (n, it) in names.iter().zip(items.into_iter()) {
+                            env.vars_mut().insert(n.clone(), it);
+                        }
+                    }
+                    _ => bail!("destructuring expects array value"),
+                }
+            }
+            Stmt::Print(args) => {
+                let parts: Result<Vec<String>> = args
+                    .iter()
+                    .cloned()
+                    .map(|e| env.eval_expr(e).map(|v| format_value(&v)))
+                    .collect();
+                println!("{}", parts?.join(" "));
+            }
+            Stmt::Expr(e) => {
+                let _ = env.eval_expr(e.clone())?;
+            }
+            Stmt::DataDecl(type_name, ctors) => {
+                let mut names = Vec::new();
+                for c in ctors {
+                    env.data_ctors.insert(c.name.clone(), c.arity);
+                    names.push(c.name.clone());
+                }
+                env.type_ctors.insert(type_name.clone(), names);
+            }
+            Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 enum Value {
     Str(String),
@@ -255,6 +384,9 @@ struct Env {
     type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
     ctor_type: HashMap<String, String>,       // ctor name -> type name
     debug: bool,
+    // CLI context
+    cli_script: Option<String>,
+    cli_args: Vec<String>,
 }
 
 impl Env {
@@ -433,6 +565,8 @@ impl Env {
             type_ctors: HashMap::new(),
             ctor_type: HashMap::new(),
             debug: false,
+            cli_script: None,
+            cli_args: Vec::new(),
         }
     }
     fn vars(&self) -> &HashMap<String, Value> {
@@ -488,6 +622,8 @@ impl Env {
                                     self.call_sdl_builtin(&name, expr_args)?
                                 } else if name.starts_with("linalg_") {
                                     self.call_linalg_builtin_values(&name, values)?
+                                } else if name.starts_with("args_") {
+                                    self.call_args_builtin_values(&name, values)?
                                 } else {
                                     self.call_function_values(name, values)?
                                 }
@@ -1731,8 +1867,36 @@ impl Env {
                 self.modules.insert(name.to_string(), v.clone());
                 Ok(v)
             }
+            "args" => {
+                let v = self.import_args();
+                self.modules.insert(name.to_string(), v.clone());
+                Ok(v)
+            }
             other => bail!("unknown module '{}'; built-ins: sdl, linalg", other),
         }
+    }
+
+    fn import_args(&mut self) -> Value {
+        let mut obj = HashMap::new();
+        // properties
+        let script = self.cli_script.clone().unwrap_or_default();
+        obj.insert("script".to_string(), Value::Str(script.clone()));
+        let args_arr = Value::Array(self.cli_args.iter().cloned().map(Value::Str).collect());
+        obj.insert("args".to_string(), args_arr);
+        let mut all_vec: Vec<Value> = Vec::new();
+        if !script.is_empty() {
+            all_vec.push(Value::Str(script));
+        }
+        for a in &self.cli_args {
+            all_vec.push(Value::Str(a.clone()));
+        }
+        obj.insert("all".to_string(), Value::Array(all_vec));
+        // methods
+        obj.insert("len".into(), Value::FuncRef("args_len".into()));
+        obj.insert("get".into(), Value::FuncRef("args_get".into()));
+        obj.insert("has".into(), Value::FuncRef("args_has".into()));
+        obj.insert("value".into(), Value::FuncRef("args_value".into()));
+        Value::Object(obj)
     }
 
     fn import_sdl(&mut self) -> Value {
@@ -2103,6 +2267,69 @@ impl Env {
                 Ok(new_tensor(out, vec![s[1], s[0]]))
             }
             _ => bail!("unknown linalg builtin {}", name),
+        }
+    }
+
+    fn call_args_builtin_values(&mut self, name: &str, values: Vec<Value>) -> Result<Value> {
+        match name {
+            "args_len" => {
+                if !values.is_empty() {
+                    bail!("args.len() takes no arguments")
+                }
+                Ok(Value::Int(self.cli_args.len() as i64))
+            }
+            "args_get" => {
+                if values.len() != 1 {
+                    bail!("args.get(index) expects 1 arg")
+                }
+                let idx = match &values[0] {
+                    Value::Int(i) => *i,
+                    _ => bail!("index must be int"),
+                };
+                if idx < 0 {
+                    bail!("negative index")
+                }
+                let ui = idx as usize;
+                if ui >= self.cli_args.len() {
+                    Ok(Value::Str(String::new()))
+                } else {
+                    Ok(Value::Str(self.cli_args[ui].clone()))
+                }
+            }
+            "args_has" => {
+                if values.len() != 1 {
+                    bail!("args.has(flag) expects 1 string arg")
+                }
+                let key = match &values[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => bail!("flag must be string"),
+                };
+                Ok(Value::Bool(self.cli_args.iter().any(|a| a == &key)))
+            }
+            "args_value" => {
+                if values.len() != 1 {
+                    bail!("args.value(key) expects 1 string arg")
+                }
+                let key = match &values[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => bail!("key must be string"),
+                };
+                let mut it = self.cli_args.iter();
+                while let Some(a) = it.next() {
+                    if a == &key {
+                        if let Some(v) = it.next() {
+                            return Ok(Value::Str(v.clone()));
+                        } else {
+                            return Ok(Value::Str(String::new()));
+                        }
+                    }
+                    if a.starts_with(&format!("{}=", key)) {
+                        return Ok(Value::Str(a[key.len() + 1..].to_string()));
+                    }
+                }
+                Ok(Value::Str(String::new()))
+            }
+            _ => bail!("unknown args builtin {}", name),
         }
     }
 }

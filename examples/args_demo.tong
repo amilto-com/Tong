@@ -1,0 +1,13 @@
+// Simple demonstration of the built-in 'args' module
+let args = import("args")
+
+print("script:", args.script)
+print("argc:", args.len())
+print("all:", args.all)
+
+// Flags and key-values
+print("has --verbose:", args.has("--verbose"))
+print("mode:", args.value("--mode"))
+
+// Positional argument access
+print("first arg:", args.get(0))

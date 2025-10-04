@@ -12,6 +12,12 @@ Authored by William Gacquer — AMILTO
 
 Contributions welcome! See “Contributing” below.
 
+## User Guide
+
+Looking for the language reference and practical how‑tos? Read the comprehensive Tong User Guide:
+
+- doc/user_guide/tong_user_guide.md
+
 ## Why the name “TONG”?
 
 We wanted a name that’s short, fun, and nerd‑accurate:

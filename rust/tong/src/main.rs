@@ -15,6 +15,9 @@ use runtime::{builtin_functions, builtin_modules, Repl};
 struct Cli {
     /// Path to a .tong source file to run (if omitted, starts interactive REPL)
     file: Option<String>,
+    /// Arguments passed to the script (after the file). These may start with '-' and are not parsed by tong itself.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    script_args: Vec<String>,
     /// List built-in modules and exit
     #[arg(long)]
     modules: bool,
@@ -66,7 +69,8 @@ fn main() -> anyhow::Result<()> {
             let src = fs::read_to_string(&file)?;
             let tokens = lexer::lex(&src)?;
             let program = parser::parse(tokens)?;
-            runtime::execute(program, cli.debug)?;
+            // Propagate script path and CLI args into runtime ENV via globals
+            runtime::execute_with_cli(program, cli.debug, Some(file), cli.script_args)?;
             Ok(())
         })();
         match result {
