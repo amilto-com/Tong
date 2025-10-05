@@ -130,11 +130,23 @@ impl Repl {
                 }
                 Stmt::Let(name, expr) => {
                     let v = self.env.eval_expr(expr.clone())?;
-                    self.env.vars_mut().insert(name.clone(), v);
+                    self.env.declare_let(name.clone(), v);
                 }
                 Stmt::Assign(name, expr) => {
                     let v = self.env.eval_expr(expr.clone())?;
-                    self.env.vars_mut().insert(name.clone(), v);
+                    if self.env.vars().contains_key(name) {
+                        self.env.assign_var(name, v)?;
+                    } else {
+                        self.env.declare_var(name.clone(), v);
+                    }
+                }
+                Stmt::Var(name, expr) => {
+                    let v = self.env.eval_expr(expr.clone())?;
+                    self.env.declare_var(name.clone(), v);
+                }
+                Stmt::VarAnn(name, _, expr) => {
+                    let v = self.env.eval_expr(expr.clone())?;
+                    self.env.declare_var(name.clone(), v);
                 }
                 Stmt::Print(args) => {
                     let parts: Result<Vec<String>> = args
@@ -153,7 +165,7 @@ impl Repl {
                     // control flow / while / if at top-level are executed via exec_stmt path
                     // For simplicity reuse exec_stmt for those
                     match stmt {
-                        Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
+                        Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) | Stmt::Var(..) | Stmt::ArrayAssign(..) => {
                             let _ = self.env.exec_stmt(stmt)?;
                             last_expr = None;
                         }

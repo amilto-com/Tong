@@ -30,4 +30,14 @@ fn main() {
         .unwrap()
         .as_secs();
     println!("cargo:rustc-env=BUILD_UNIX={}", ts);
+    // Build time in YYYYmmdd_HHMM format
+    let output = Command::new("date")
+        .arg("+%Y%m%d_%H%M")
+        .output()
+        .expect("Failed to run date command");
+    let datetime = String::from_utf8(output.stdout)
+        .expect("Invalid UTF-8 output")
+        .trim()
+        .to_string();
+    println!("cargo:rustc-env=BUILD_TIME={}", datetime);
 }

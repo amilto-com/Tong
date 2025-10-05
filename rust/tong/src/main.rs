@@ -16,7 +16,7 @@ use runtime::{builtin_functions, builtin_modules, Repl};
 
 #[derive(Parser)]
 #[command(name = "tong")]
-#[command(version = "0.1.0")]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("BUILD_TIME")))]
 #[command(
     about = "TONG - The Ultimate Programming Language (Rust MVP). Run with a .tong file to execute it, or with no arguments to start the interactive REPL."
 )]

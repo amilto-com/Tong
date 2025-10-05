@@ -860,7 +860,7 @@ impl crate::env::Env {
         self.vars_stack.pop();
         self.muts_stack.pop();
     }
-    fn declare_let(&mut self, name: String, val: Value) {
+    pub fn declare_let(&mut self, name: String, val: Value) {
         if let Some(frame) = self.vars_stack.last_mut() {
             frame.insert(name.clone(), val);
         }
@@ -868,7 +868,7 @@ impl crate::env::Env {
             mf.insert(name, false);
         }
     }
-    fn declare_var(&mut self, name: String, val: Value) {
+    pub fn declare_var(&mut self, name: String, val: Value) {
         if let Some(frame) = self.vars_stack.last_mut() {
             frame.insert(name.clone(), val);
         }
@@ -886,7 +886,7 @@ impl crate::env::Env {
         self.declare_var(name, val);
         Ok(())
     }
-    fn assign_var(&mut self, name: &str, val: Value) -> Result<()> {
+    pub fn assign_var(&mut self, name: &str, val: Value) -> Result<()> {
         // find from innermost to outermost
         for (vi, frame) in self.vars_stack.iter_mut().enumerate().rev() {
             if frame.contains_key(name) {
