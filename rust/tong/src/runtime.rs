@@ -9,6 +9,34 @@ type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
 // Add optional return type on pattern functions (param annotations for patterns are not yet supported)
 type PatternClause = (Vec<Pattern>, Option<Expr>, Option<TypeAnn>, Vec<Stmt>);
 
+pub use crate::value::*;
+pub use crate::env::*;
+pub use crate::builtins::*;
+pub use crate::repl::*;
+
+// Helper conversions for Value to numeric types (only needed when SDL backend active)
+#[cfg(feature = "sdl3")]
+impl Value {
+    pub fn as_int_u8(&self) -> anyhow::Result<u8> {
+        match self {
+            Value::Int(i) => Ok((*i).clamp(0, 255) as u8),
+            _ => anyhow::bail!("expected int"),
+        }
+    }
+    pub fn as_int_u32(&self) -> anyhow::Result<u32> {
+        match self {
+            Value::Int(i) => Ok((*i).max(0) as u32),
+            _ => anyhow::bail!("expected int"),
+        }
+    }
+    pub fn as_int_i32(&self) -> anyhow::Result<i32> {
+        match self {
+            Value::Int(i) => Ok(*i as i32),
+            _ => anyhow::bail!("expected int"),
+        }
+    }
+}
+
 // Built-in module registry (update when adding more modules)
 pub fn builtin_modules() -> Vec<&'static str> {
     vec!["sdl", "linalg", "args"]
@@ -595,30 +623,6 @@ pub fn execute_with_cli(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-enum Value {
-    Str(String),
-    Float(f64),
-    Int(i64),
-    Bool(bool),
-    Array(Vec<Value>),
-    Lambda {
-        params: Vec<String>,
-        body: Box<Expr>,
-        env: HashMap<String, Value>,
-    },
-    FuncRef(String),
-    Object(HashMap<String, Value>),
-    Constructor {
-        name: String,
-        fields: Vec<Value>,
-    },
-    Partial {
-        name: String,
-        applied: Vec<Value>,
-    },
-}
-
 #[derive(Default)]
 struct Env {
     vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
@@ -698,7 +702,7 @@ impl Env {
     }
 
     // Execute a single statement. Return Some(value) if a Return was hit.
-    fn exec_stmt(&mut self, s: &Stmt) -> Result<Option<Value>> {
+    pub fn exec_stmt(&mut self, s: &Stmt) -> Result<Option<Value>> {
         if self.debug {
             eprintln!("[TONG][dbg] exec {:?}", s.kind_name());
         }
@@ -984,7 +988,7 @@ impl Env {
         }
     }
 
-    fn eval_expr(&mut self, e: Expr) -> Result<Value> {
+    pub fn eval_expr(&mut self, e: Expr) -> Result<Value> {
         let v = match e {
             Expr::Property { target, name } => {
                 let obj = self.eval_expr(*target)?;
@@ -1773,6 +1777,7 @@ impl Env {
                                 args.iter().cloned().map(|a| self.eval_expr(a)).collect();
                             let vals = evaled?;
                             if vals.len() < params.len() {
+                                // build new lambda with remaining params capturing applied ones
                                 let mut captured = env.clone();
                                 for (p, vv) in params.iter().zip(vals.iter()) {
                                     captured.insert(p.clone(), vv.clone());
@@ -1901,7 +1906,7 @@ impl Env {
     }
 
     // Lambda call with pre-evaluated values (avoids re-evaluating and supports object args)
-    fn call_lambda_values(
+    pub(crate) fn call_lambda_values(
         &mut self,
         params: Vec<String>,
         body: Expr,
@@ -2171,8 +2176,7 @@ impl Env {
         for (idx, (pat, guard, _body)) in arms.iter().enumerate() {
             if wildcard_seen {
                 // If earlier wildcard had a guard, later arms might still be relevant; only treat as unreachable if earlier wildcard had no guard
-                if seen_unconditional.contains("_") && std::env::var("TONG_NO_MATCH_WARN").is_err()
-                {
+                if seen_unconditional.contains("_") && std::env::var("TONG_NO_MATCH_WARN").is_err() {
                     eprintln!("[TONG][warn] unreachable match arm #{idx} (follows wildcard)");
                 }
                 continue;
@@ -2304,7 +2308,7 @@ impl Env {
             }
         })
     }
-    fn import_module(&mut self, name: &str) -> Result<Value> {
+    pub fn import_module(&mut self, name: &str) -> Result<Value> {
         if let Some(v) = self.modules.get(name) {
             return Ok(v.clone());
         }
@@ -2434,517 +2438,6 @@ impl Env {
                 other => bail!("unknown SDL builtin {}", other),
             }
         }
-    }
-}
-
-// tests moved to end of file to avoid clippy::items-after-test-module
-// removed duplicate tests module (kept single module at EOF)
-
-impl Env {
-    fn import_linalg(&mut self) -> Value {
-        let mut obj = HashMap::new();
-        // function refs
-        for (k, v) in [
-            ("zeros", "linalg_zeros"),
-            ("ones", "linalg_ones"),
-            ("tensor", "linalg_tensor"),
-            ("shape", "linalg_shape"),
-            ("rank", "linalg_rank"),
-            ("get", "linalg_get"),
-            ("set", "linalg_set"),
-            ("add", "linalg_add"),
-            ("sub", "linalg_sub"),
-            ("mul", "linalg_mul"),
-            ("dot", "linalg_dot"),
-            ("matmul", "linalg_matmul"),
-            ("transpose", "linalg_transpose"),
-        ] {
-            obj.insert(k.to_string(), Value::FuncRef(v.to_string()));
-        }
-        Value::Object(obj)
-    }
-
-    fn call_linalg_builtin_values(&mut self, name: &str, values: Vec<Value>) -> Result<Value> {
-        // helpers
-        fn to_usize_vec(v: &Value) -> Result<Vec<usize>> {
-            match v {
-                Value::Array(items) => items
-                    .iter()
-                    .map(|x| match x {
-                        Value::Int(i) if *i >= 0 => Ok(*i as usize),
-                        _ => bail!("shape/index must be non-negative ints"),
-                    })
-                    .collect(),
-                _ => bail!("expected array of ints"),
-            }
-        }
-        fn to_f64_vec(v: &Value) -> Result<Vec<f64>> {
-            match v {
-                Value::Array(items) => items
-                    .iter()
-                    .map(|x| match x {
-                        Value::Int(i) => Ok(*i as f64),
-                        Value::Float(f) => Ok(*f),
-                        _ => bail!("expected numeric array"),
-                    })
-                    .collect(),
-                _ => bail!("expected numeric array"),
-            }
-        }
-        fn new_tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
-            let mut obj = HashMap::new();
-            obj.insert("__tensor__".to_string(), Value::Bool(true));
-            obj.insert(
-                "shape".to_string(),
-                Value::Array(shape.iter().map(|d| Value::Int(*d as i64)).collect()),
-            );
-            obj.insert(
-                "data".to_string(),
-                Value::Array(data.iter().map(|f| Value::Float(*f)).collect()),
-            );
-            Value::Object(obj)
-        }
-        fn is_tensor(v: &Value) -> Option<(Vec<usize>, Vec<f64>)> {
-            if let Value::Object(map) = v {
-                if let Some(Value::Bool(true)) = map.get("__tensor__") {
-                    if let (Some(Value::Array(shape_vals)), Some(Value::Array(data_vals))) =
-                        (map.get("shape"), map.get("data"))
-                    {
-                        let mut shape = Vec::new();
-                        for sv in shape_vals {
-                            if let Value::Int(i) = sv {
-                                shape.push(*i as usize);
-                            } else {
-                                return None;
-                            }
-                        }
-                        let mut data = Vec::new();
-                        for dv in data_vals {
-                            match dv {
-                                Value::Int(i) => data.push(*i as f64),
-                                Value::Float(f) => data.push(*f),
-                                _ => return None,
-                            }
-                        }
-                        return Some((shape, data));
-                    }
-                }
-            }
-            None
-        }
-        fn numel(shape: &[usize]) -> usize {
-            shape.iter().product()
-        }
-        fn flat_index(shape: &[usize], idx: &[usize]) -> Result<usize> {
-            if shape.len() != idx.len() {
-                bail!("index rank mismatch");
-            }
-            let mut stride = 1usize;
-            let mut strides = vec![0; shape.len()];
-            for (i, d) in shape.iter().enumerate().rev() {
-                strides[i] = stride;
-                stride *= *d;
-            }
-            let mut off = 0usize;
-            for (i, &ix) in idx.iter().enumerate() {
-                if ix >= shape[i] {
-                    bail!("index out of bounds");
-                }
-                off += ix * strides[i];
-            }
-            Ok(off)
-        }
-
-        match name {
-            "linalg_zeros" => {
-                if values.len() != 1 {
-                    bail!("zeros(shape) expects 1 arg");
-                }
-                let shape = to_usize_vec(&values[0])?;
-                let n = numel(&shape);
-                Ok(new_tensor(vec![0.0; n], shape))
-            }
-            "linalg_ones" => {
-                if values.len() != 1 {
-                    bail!("ones(shape) expects 1 arg");
-                }
-                let shape = to_usize_vec(&values[0])?;
-                let n = numel(&shape);
-                Ok(new_tensor(vec![1.0; n], shape))
-            }
-            "linalg_tensor" => {
-                if values.len() != 2 {
-                    bail!("tensor(data, shape) expects 2 args");
-                }
-                let data = to_f64_vec(&values[0])?;
-                let shape = to_usize_vec(&values[1])?;
-                if data.len() != numel(&shape) {
-                    bail!("data length does not match shape");
-                }
-                Ok(new_tensor(data, shape))
-            }
-            "linalg_shape" => {
-                if values.len() != 1 {
-                    bail!("shape(t) expects 1 arg");
-                }
-                if let Some((shape, _)) = is_tensor(&values[0]) {
-                    Ok(Value::Array(
-                        shape.into_iter().map(|d| Value::Int(d as i64)).collect(),
-                    ))
-                } else {
-                    bail!("argument is not a tensor")
-                }
-            }
-            "linalg_rank" => {
-                if values.len() != 1 {
-                    bail!("rank(t) expects 1 arg");
-                }
-                if let Some((shape, _)) = is_tensor(&values[0]) {
-                    Ok(Value::Int(shape.len() as i64))
-                } else {
-                    bail!("argument is not a tensor")
-                }
-            }
-            "linalg_get" => {
-                if values.len() != 2 {
-                    bail!("get(t, idx) expects 2 args");
-                }
-                if let Some((shape, data)) = is_tensor(&values[0]) {
-                    let idxs = to_usize_vec(&values[1])?;
-                    let fi = flat_index(&shape, &idxs)?;
-                    Ok(Value::Float(data[fi]))
-                } else {
-                    bail!("argument is not a tensor")
-                }
-            }
-            "linalg_set" => {
-                if values.len() != 3 {
-                    bail!("set(t, idx, v) expects 3 args");
-                }
-                if let Some((shape, mut data)) = is_tensor(&values[0]) {
-                    let idxs = to_usize_vec(&values[1])?;
-                    let fi = flat_index(&shape, &idxs)?;
-                    let val = match &values[2] {
-                        Value::Int(i) => *i as f64,
-                        Value::Float(f) => *f,
-                        _ => bail!("value must be numeric"),
-                    };
-                    data[fi] = val;
-                    Ok(new_tensor(data, shape))
-                } else {
-                    bail!("argument is not a tensor")
-                }
-            }
-            "linalg_add" | "linalg_sub" | "linalg_mul" => {
-                if values.len() != 2 {
-                    bail!("binary elementwise expects 2 args");
-                }
-                let (shape_a, data_a) =
-                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (shape_b, data_b) = is_tensor(&values[1])
-                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if shape_a != shape_b {
-                    bail!("shape mismatch");
-                }
-                let data: Vec<f64> = data_a
-                    .iter()
-                    .zip(data_b.iter())
-                    .map(|(a, b)| match name {
-                        "linalg_add" => a + b,
-                        "linalg_sub" => a - b,
-                        _ => a * b,
-                    })
-                    .collect();
-                Ok(new_tensor(data, shape_a))
-            }
-            "linalg_dot" => {
-                if values.len() != 2 {
-                    bail!("dot(a,b) expects 2 args");
-                }
-                let (shape_a, data_a) =
-                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (shape_b, data_b) = is_tensor(&values[1])
-                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if shape_a.len() != 1 || shape_b.len() != 1 {
-                    bail!("dot expects 1-D tensors");
-                }
-                if shape_a[0] != shape_b[0] {
-                    bail!("length mismatch");
-                }
-                let mut s = 0.0;
-                for (a, b) in data_a.iter().zip(data_b.iter()) {
-                    s += a * b;
-                }
-                Ok(Value::Float(s))
-            }
-            "linalg_matmul" => {
-                if values.len() != 2 {
-                    bail!("matmul(a,b) expects 2 args");
-                }
-                let (sa, da) =
-                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("first arg not tensor"))?;
-                let (sb, db) = is_tensor(&values[1])
-                    .ok_or_else(|| anyhow::anyhow!("second arg not tensor"))?;
-                if sa.len() != 2 || sb.len() != 2 {
-                    bail!("matmul expects 2-D tensors");
-                }
-                if sa[1] != sb[0] {
-                    bail!("inner dimension mismatch");
-                }
-                let (m, k, n) = (sa[0], sa[1], sb[1]);
-                let mut out = vec![0.0; m * n];
-                for i in 0..m {
-                    for j in 0..n {
-                        let mut acc = 0.0;
-                        for p in 0..k {
-                            acc += da[i * k + p] * db[p * n + j];
-                        }
-                        out[i * n + j] = acc;
-                    }
-                }
-                Ok(new_tensor(out, vec![m, n]))
-            }
-            "linalg_transpose" => {
-                if values.len() != 1 {
-                    bail!("transpose(a) expects 1 arg");
-                }
-                let (s, d) =
-                    is_tensor(&values[0]).ok_or_else(|| anyhow::anyhow!("argument not tensor"))?;
-                if s.len() != 2 {
-                    bail!("transpose expects rank-2 tensor");
-                }
-                let (m, n) = (s[0], s[1]);
-                let mut out = vec![0.0; m * n];
-                for i in 0..m {
-                    for j in 0..n {
-                        out[j * m + i] = d[i * n + j];
-                    }
-                }
-                Ok(new_tensor(out, vec![s[1], s[0]]))
-            }
-            _ => bail!("unknown linalg builtin {}", name),
-        }
-    }
-
-    fn call_args_builtin_values(&mut self, name: &str, values: Vec<Value>) -> Result<Value> {
-        match name {
-            "args_len" => {
-                if !values.is_empty() {
-                    bail!("args.len() takes no arguments")
-                }
-                Ok(Value::Int(self.cli_args.len() as i64))
-            }
-            "args_parse_int" => {
-                if values.len() != 1 {
-                    bail!("args.parse_int(s) expects 1 string arg")
-                }
-                let s = match &values[0] {
-                    Value::Str(t) => t.clone(),
-                    _ => bail!("parse_int expects string"),
-                };
-                match s.trim().parse::<i64>() {
-                    Ok(i) => Ok(Value::Int(i)),
-                    Err(_) => Ok(Value::Int(0)),
-                }
-            }
-            "args_get" => {
-                if values.len() != 1 {
-                    bail!("args.get(index) expects 1 arg")
-                }
-                let idx = match &values[0] {
-                    Value::Int(i) => *i,
-                    _ => bail!("index must be int"),
-                };
-                if idx < 0 {
-                    bail!("negative index")
-                }
-                let ui = idx as usize;
-                if ui >= self.cli_args.len() {
-                    Ok(Value::Str(String::new()))
-                } else {
-                    Ok(Value::Str(self.cli_args[ui].clone()))
-                }
-            }
-            "args_has" => {
-                if values.len() != 1 {
-                    bail!("args.has(flag) expects 1 string arg")
-                }
-                let key = match &values[0] {
-                    Value::Str(s) => s.clone(),
-                    _ => bail!("flag must be string"),
-                };
-                Ok(Value::Bool(self.cli_args.iter().any(|a| a == &key)))
-            }
-            "args_value" => {
-                if values.len() != 1 {
-                    bail!("args.value(key) expects 1 string arg")
-                }
-                let key = match &values[0] {
-                    Value::Str(s) => s.clone(),
-                    _ => bail!("key must be string"),
-                };
-                let mut it = self.cli_args.iter();
-                while let Some(a) = it.next() {
-                    if a == &key {
-                        if let Some(v) = it.next() {
-                            return Ok(Value::Str(v.clone()));
-                        } else {
-                            return Ok(Value::Str(String::new()));
-                        }
-                    }
-                    if a.starts_with(&format!("{}=", key)) {
-                        return Ok(Value::Str(a[key.len() + 1..].to_string()));
-                    }
-                }
-                Ok(Value::Str(String::new()))
-            }
-            _ => bail!("unknown args builtin {}", name),
-        }
-    }
-}
-
-// ---------------- REPL SUPPORT (public minimal API) -----------------
-pub struct Repl {
-    env: Env,
-}
-
-impl Repl {
-    pub fn new() -> Self {
-        Self { env: Env::new() }
-    }
-
-    // Evaluate a source snippet, returning an optional printable value (final bare expression)
-    pub fn eval_snippet(&mut self, src: &str) -> Result<Option<String>> {
-        // Lex & parse new snippet each time; keep accumulated functions / vars
-        let tokens = crate::lexer::lex(src)?;
-        let program = crate::parser::parse(tokens)?;
-
-        // First collect function/main definitions without clearing existing ones
-        for stmt in &program.stmts {
-            match stmt {
-                Stmt::FnDef(name, params, body) => {
-                    // Plain function: overwrite previous definition
-                    self.env
-                        .funcs
-                        .insert(name.clone(), (params.clone(), body.clone()));
-                }
-                Stmt::FnDefGuarded(name, params, guard, body) => {
-                    // Append guarded clause to existing set (REPL allows incremental clause authoring)
-                    self.env
-                        .guarded_funcs
-                        .entry(name.clone())
-                        .or_default()
-                        .push((params.clone(), guard.clone(), body.clone()));
-                }
-                Stmt::FnDefGuardedTyped(name, params, ret_ann, guard, body) => {
-                    self.env.fn_types.insert(
-                        name.clone(),
-                        (
-                            params.iter().map(|(_, t)| t.clone()).collect(),
-                            ret_ann.clone(),
-                        ),
-                    );
-                    self.env
-                        .guarded_funcs
-                        .entry(name.clone())
-                        .or_default()
-                        .push((
-                            params.iter().map(|(n, _)| n.clone()).collect(),
-                            guard.clone(),
-                            body.clone(),
-                        ));
-                }
-                Stmt::FnDefPattern(name, patterns, guard, ret_ann, body) => {
-                    // Append pattern clause maintaining order of entry across snippets
-                    self.env
-                        .pattern_funcs
-                        .entry(name.clone())
-                        .or_default()
-                        .push((
-                            patterns.clone(),
-                            guard.clone(),
-                            ret_ann.clone(),
-                            body.clone(),
-                        ));
-                }
-                Stmt::FnMain(body) => {
-                    self.env
-                        .funcs
-                        .insert("main".to_string(), (Vec::new(), body.clone()));
-                }
-                Stmt::DataDecl(_tname, ctors) => {
-                    for c in ctors {
-                        self.env.data_ctors.insert(c.name.clone(), c.arity);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Execute non-function statements; remember last expression value if it was a bare Expr stmt
-        let mut last_expr: Option<Value> = None;
-        for stmt in &program.stmts {
-            match stmt {
-                Stmt::Import(name, module) => {
-                    let v = self.env.import_module(module)?;
-                    self.env.vars_mut().insert(name.clone(), v);
-                }
-                Stmt::Let(name, expr) => {
-                    let v = self.env.eval_expr(expr.clone())?;
-                    self.env.vars_mut().insert(name.clone(), v);
-                }
-                Stmt::Assign(name, expr) => {
-                    let v = self.env.eval_expr(expr.clone())?;
-                    self.env.vars_mut().insert(name.clone(), v);
-                }
-                Stmt::Print(args) => {
-                    let parts: Result<Vec<String>> = args
-                        .iter()
-                        .cloned()
-                        .map(|e| self.env.eval_expr(e).map(|v| format_value(&v)))
-                        .collect();
-                    println!("{}", parts?.join(" "));
-                    last_expr = None; // print supersedes expression echo
-                }
-                Stmt::Expr(e) => {
-                    let v = self.env.eval_expr(e.clone())?;
-                    last_expr = Some(v);
-                }
-                _ => {
-                    // control flow / while / if at top-level are executed via exec_stmt path
-                    // For simplicity reuse exec_stmt for those
-                    match stmt {
-                        Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
-                            let _ = self.env.exec_stmt(stmt)?;
-                            last_expr = None;
-                        }
-                        Stmt::FnDef(..)
-                        | Stmt::FnDefGuarded(..)
-                        | Stmt::FnDefPattern(..)
-                        | Stmt::FnMain(..)
-                        | Stmt::DataDecl(..) => {}
-                        _ => {}
-                    }
-                }
-            }
-        }
-        Ok(last_expr.map(|v| format_value(&v)))
-    }
-
-    pub fn list_vars(&self) -> Vec<(String, String)> {
-        let mut out = Vec::new();
-        for (k, v) in self.env.vars() {
-            if k.starts_with("__") {
-                continue;
-            }
-            out.push((k.clone(), format_value(v)));
-        }
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
-    }
-
-    pub fn reset(&mut self) {
-        self.env = Env::new();
     }
 }
 
@@ -3133,29 +2626,6 @@ impl Env {
                 Ok(Value::Int(0))
             }
             other => bail!("unknown SDL builtin {}", other),
-        }
-    }
-}
-
-// Helper conversions for Value to numeric types (only needed when SDL backend active)
-#[cfg(feature = "sdl3")]
-impl Value {
-    fn as_int_u8(&self) -> Result<u8> {
-        match self {
-            Value::Int(i) => Ok((*i).clamp(0, 255) as u8),
-            _ => bail!("expected int"),
-        }
-    }
-    fn as_int_u32(&self) -> Result<u32> {
-        match self {
-            Value::Int(i) => Ok((*i).max(0) as u32),
-            _ => bail!("expected int"),
-        }
-    }
-    fn as_int_i32(&self) -> Result<i32> {
-        match self {
-            Value::Int(i) => Ok(*i as i32),
-            _ => bail!("expected int"),
         }
     }
 }

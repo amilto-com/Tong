@@ -4,6 +4,10 @@ use std::fs;
 mod lexer;
 mod parser;
 mod runtime;
+mod value;
+mod env;
+mod builtins;
+mod repl;
 use runtime::{builtin_functions, builtin_modules, Repl};
 
 #[derive(Parser)]
