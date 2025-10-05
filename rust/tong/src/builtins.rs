@@ -1,7 +1,5 @@
-use anyhow::{anyhow, bail, Result};
-use std::collections::HashMap;
+use anyhow::{bail, Result};
 
-use crate::parser::Expr;
 use crate::value::Value;
 
 impl crate::env::Env {

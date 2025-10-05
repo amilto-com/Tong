@@ -11,7 +11,6 @@ type PatternClause = (Vec<Pattern>, Option<Expr>, Option<TypeAnn>, Vec<Stmt>);
 
 pub use crate::value::*;
 pub use crate::env::*;
-pub use crate::builtins::*;
 pub use crate::repl::*;
 
 pub fn builtin_modules() -> Vec<&'static str> {

@@ -1,8 +1,6 @@
-use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::parser::{BinOp, Expr, Pattern, Program, Stmt, TypeAnn};
+use crate::parser::{Expr, Pattern, Stmt, TypeAnn};
 use crate::value::Value;
 
 // Clause type aliases to keep signatures and storage readable (avoid clippy::type_complexity)

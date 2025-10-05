@@ -1,4 +1,3 @@
-use super::*;
 
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -7,7 +6,7 @@ use crate::env::Env;
 
 impl Env {
     pub fn import_linalg(&mut self) -> Value {
-        let mut obj = HashMap::new();
+        let obj = HashMap::new();
         // TODO: implement linalg module
         Value::Object(obj)
     }

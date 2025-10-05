@@ -1,8 +1,6 @@
-use super::*;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use std::collections::HashMap;
-use std::time::Duration;
 use crate::value::Value;
 use crate::env::Env;
 use crate::parser::Expr;
