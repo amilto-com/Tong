@@ -4,6 +4,7 @@ use crate::env::Env;
 use crate::lexer::lex;
 use crate::parser::{parse, Stmt};
 use crate::value::Value;
+use rustyline::{Editor, Result as RustyResult};
 
 fn format_value(v: &Value) -> String {
     match v {
