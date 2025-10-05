@@ -2,12 +2,7 @@ use anyhow::{anyhow, bail, Result}; // anyhow! macro and helpers
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH}; // timing helpers (general + SDL)
 
-use crate::parser::{BinOp, Expr, Pattern, Program, Stmt, TypeAnn};
-
-// Clause type aliases to keep signatures and storage readable (avoid clippy::type_complexity)
-type GuardedClause = (Vec<String>, Expr, Vec<Stmt>);
-// Add optional return type on pattern functions (param annotations for patterns are not yet supported)
-type PatternClause = (Vec<Pattern>, Option<Expr>, Option<TypeAnn>, Vec<Stmt>);
+use crate::parser::{Expr, Pattern, Stmt, TypeAnn, Program, BinOp};
 
 pub use crate::value::*;
 pub use crate::env::*;
@@ -241,7 +236,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
     for stmt in &program.stmts {
         match stmt {
             Stmt::Import(name, module) => {
-                let v = env.import_module(module)?;
+                let v = env.import_module(&module)?;
                 env.vars_mut().insert(name.clone(), v);
             }
             Stmt::Let(name, expr) => {
@@ -254,13 +249,13 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
             }
             Stmt::Assign(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.assign_var(name, v)?;
+                env.assign_var(&name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
                 let idx_v = env.eval_expr(idx_expr.clone())?;
                 let new_v = env.eval_expr(val_expr.clone())?;
                 match idx_v {
-                    Value::Int(i) => env.array_assign(name, i, new_v)?,
+                    Value::Int(i) => env.array_assign(&name, i, new_v)?,
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
             }
@@ -301,7 +296,7 @@ pub fn execute(program: Program, debug: bool) -> Result<()> {
             Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
             // Allow control-flow at top-level
             Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
-                let _ = env.exec_stmt(stmt)?;
+                let _ = env.exec_stmt(&stmt)?;
             }
             _ => {}
         }
@@ -326,7 +321,7 @@ pub fn lint_types(program: &Program) -> Vec<String> {
     for s in &program.stmts {
         match s {
             Stmt::LetAnn(_, ann, rhs) | Stmt::VarAnn(_, ann, rhs) => {
-                if let Some(it) = infer_expr_type(rhs) {
+                if let Some(it) = infer_expr_type(&rhs) {
                     if *ann != TypeAnn::Any && *ann != it {
                         out.push(format!(
                             "annotation mismatch: expected {:?}, got {:?}",
@@ -531,7 +526,7 @@ pub fn execute_with_cli(
     for stmt in &program.stmts {
         match stmt {
             Stmt::Import(name, module) => {
-                let v = env.import_module(module)?;
+                let v = env.import_module(&module)?;
                 env.vars_mut().insert(name.clone(), v);
             }
             Stmt::Let(name, expr) => {
@@ -544,13 +539,13 @@ pub fn execute_with_cli(
             }
             Stmt::Assign(name, expr) => {
                 let v = env.eval_expr(expr.clone())?;
-                env.assign_var(name, v)?;
+                env.assign_var(&name, v)?;
             }
             Stmt::ArrayAssign(name, idx_expr, val_expr) => {
                 let idx_v = env.eval_expr(idx_expr.clone())?;
                 let new_v = env.eval_expr(val_expr.clone())?;
                 match idx_v {
-                    Value::Int(i) => env.array_assign(name, i, new_v)?,
+                    Value::Int(i) => env.array_assign(&name, i, new_v)?,
                     _ => bail!("array element assignment expects array variable and int index"),
                 }
             }
@@ -590,7 +585,7 @@ pub fn execute_with_cli(
             Stmt::FnDefGuarded(_, _, _, _) => { /* already collected */ }
             Stmt::FnDefGuardedTyped(_, _, _, _, _) => { /* already collected */ }
             Stmt::If(..) | Stmt::While(..) | Stmt::Parallel(..) | Stmt::Return(..) => {
-                let _ = env.exec_stmt(stmt)?;
+                let _ = env.exec_stmt(&stmt)?;
             }
             _ => {}
         }
@@ -1687,10 +1682,6 @@ impl crate::env::Env {
                         (Value::Float(a), Value::Int(b), BinOp::Le) => Value::Bool(a <= b as f64),
                         (Value::Float(a), Value::Int(b), BinOp::Gt) => Value::Bool(a > b as f64),
                         (Value::Float(a), Value::Int(b), BinOp::Ge) => Value::Bool(a >= b as f64),
-                        (Value::Int(a), Value::Float(b), BinOp::Lt) => Value::Bool((a as f64) < b),
-                        (Value::Int(a), Value::Float(b), BinOp::Le) => Value::Bool((a as f64) <= b),
-                        (Value::Int(a), Value::Float(b), BinOp::Gt) => Value::Bool((a as f64) > b),
-                        (Value::Int(a), Value::Float(b), BinOp::Ge) => Value::Bool((a as f64) >= b),
 
                         // Bitwise ops (int-only), but allow Bool for backward-compat (non-short-circuit)
                         (Value::Bool(a), Value::Bool(b), BinOp::BitAnd) => Value::Bool(a & b),
