@@ -4,6 +4,8 @@ use std::fs;
 mod lexer;
 mod parser;
 mod runtime;
+mod execute;
+mod eval;
 mod value;
 mod env;
 mod builtins;
@@ -12,7 +14,8 @@ mod args;
 mod sdl;
 mod linalg;
 
-use runtime::{builtin_functions, builtin_modules, Repl};
+use execute::{builtin_functions, builtin_modules, execute_with_cli};
+use runtime::Repl;
 use rustyline::DefaultEditor;
 
 #[derive(Parser)]
@@ -79,7 +82,7 @@ fn main() -> anyhow::Result<()> {
             let tokens = lexer::lex(&src)?;
             let program = parser::parse(tokens)?;
             // Propagate script path and CLI args into runtime ENV via globals
-            runtime::execute_with_cli(program, cli.debug, Some(file), cli.script_args)?;
+            execute_with_cli(program, cli.debug, Some(file), cli.script_args)?;
             Ok(())
         })();
         match result {

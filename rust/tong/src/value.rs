@@ -44,3 +44,41 @@ impl Value {
         }
     }
 }
+
+pub fn format_value(v: &Value) -> String {
+    match v {
+        Value::Str(s) => s.clone(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => {
+            if f.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                format!("{}", f)
+            }
+        }
+        Value::Bool(b) => b.to_string(),
+        Value::Array(items) => {
+            let parts: Vec<String> = items.iter().map(format_value).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Value::Lambda { .. } => "<lambda>".to_string(),
+        Value::FuncRef(name) => format!("<func:{}>", name),
+        Value::Object(_) => "<object>".to_string(),
+        Value::Constructor { name, fields } => {
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                format!(
+                    "{}({})",
+                    name,
+                    fields
+                        .iter()
+                        .map(format_value)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+        }
+        Value::Partial { name, applied } => format!("<partial:{}:{}>", name, applied.len()),
+    }
+}
