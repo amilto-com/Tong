@@ -14,30 +14,6 @@ pub use crate::env::*;
 pub use crate::builtins::*;
 pub use crate::repl::*;
 
-// Helper conversions for Value to numeric types (only needed when SDL backend active)
-#[cfg(feature = "sdl3")]
-impl Value {
-    pub fn as_int_u8(&self) -> anyhow::Result<u8> {
-        match self {
-            Value::Int(i) => Ok((*i).clamp(0, 255) as u8),
-            _ => anyhow::bail!("expected int"),
-        }
-    }
-    pub fn as_int_u32(&self) -> anyhow::Result<u32> {
-        match self {
-            Value::Int(i) => Ok((*i).max(0) as u32),
-            _ => anyhow::bail!("expected int"),
-        }
-    }
-    pub fn as_int_i32(&self) -> anyhow::Result<i32> {
-        match self {
-            Value::Int(i) => Ok(*i as i32),
-            _ => anyhow::bail!("expected int"),
-        }
-    }
-}
-
-// Built-in module registry (update when adding more modules)
 pub fn builtin_modules() -> Vec<&'static str> {
     vec!["sdl", "linalg", "args"]
 }
@@ -623,29 +599,8 @@ pub fn execute_with_cli(
     Ok(())
 }
 
-#[derive(Default)]
-struct Env {
-    vars_stack: Vec<HashMap<String, Value>>, // lexical-style stack
-    muts_stack: Vec<HashMap<String, bool>>,  // per-scope mutability (true = mutable)
-    funcs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
-    fn_types: HashMap<String, (Vec<Option<TypeAnn>>, Option<TypeAnn>)>, // function -> (param annotations, return)
-    guarded_funcs: HashMap<String, Vec<GuardedClause>>,                 // guarded multi-clause
-    pattern_funcs: HashMap<String, Vec<PatternClause>>,                 // pattern parameter clauses
-    modules: HashMap<String, Value>,
-    #[cfg(not(feature = "sdl3"))]
-    sdl_frame: i64,
-    #[cfg(feature = "sdl3")]
-    sdl: Option<SdlState>,
-    data_ctors: HashMap<String, usize>,       // ctor name -> arity
-    type_ctors: HashMap<String, Vec<String>>, // type name -> ctor names
-    ctor_type: HashMap<String, String>,       // ctor name -> type name
-    debug: bool,
-    // CLI context
-    cli_script: Option<String>,
-    cli_args: Vec<String>,
-}
 
-impl Env {
+impl crate::env::Env {
     // In-place array element assignment for mutable (var) arrays.
     // If the variable is mutable and holds an Array, update the element at idx.
     // Errors on immutability, negative or OOB index, or non-array value.
@@ -876,7 +831,13 @@ impl Env {
             }
         }
     }
-    fn new() -> Self {
+    pub(crate) fn vars(&self) -> &HashMap<String, Value> {
+        self.vars_stack.last().unwrap()
+    }
+    pub(crate) fn vars_mut(&mut self) -> &mut HashMap<String, Value> {
+        self.vars_stack.last_mut().unwrap()
+    }
+    pub fn new() -> Self {
         Self {
             vars_stack: vec![HashMap::new()],
             muts_stack: vec![HashMap::new()],
@@ -896,12 +857,6 @@ impl Env {
             cli_script: None,
             cli_args: Vec::new(),
         }
-    }
-    fn vars(&self) -> &HashMap<String, Value> {
-        self.vars_stack.last().unwrap()
-    }
-    fn vars_mut(&mut self) -> &mut HashMap<String, Value> {
-        self.vars_stack.last_mut().unwrap()
     }
     fn push_scope(&mut self) {
         self.vars_stack.push(HashMap::new());
@@ -1932,7 +1887,7 @@ impl Env {
         }
         if name.starts_with("linalg_") {
             let evaled: Result<Vec<Value>> = args.into_iter().map(|a| self.eval_expr(a)).collect();
-            return self.call_linalg_builtin_values(&name, evaled?);
+                       return self.call_linalg_builtin_values(&name, evaled?);
         }
         if let Some((params, body)) = self.funcs.get(&name).cloned() {
             if params.len() != args.len() {
@@ -2265,7 +2220,7 @@ fn expr_from_value(v: &Value) -> Expr {
 // For builtin dispatch where we already have evaluated values, keep non-expressible values as-is via a placeholder approach.
 // no-op
 
-impl Env {
+impl crate::env::Env {
     fn match_pattern(&mut self, pat: &Pattern, v: &Value) -> Result<bool> {
         Ok(match pat {
             Pattern::Wildcard => true,
@@ -2308,328 +2263,7 @@ impl Env {
             }
         })
     }
-    pub fn import_module(&mut self, name: &str) -> Result<Value> {
-        if let Some(v) = self.modules.get(name) {
-            return Ok(v.clone());
-        }
-        match name {
-            "sdl" => {
-                let v = self.import_sdl();
-                self.modules.insert(name.to_string(), v.clone());
-                Ok(v)
-            }
-            "linalg" => {
-                let v = self.import_linalg();
-                self.modules.insert(name.to_string(), v.clone());
-                Ok(v)
-            }
-            "args" => {
-                let v = self.import_args();
-                self.modules.insert(name.to_string(), v.clone());
-                Ok(v)
-            }
-            other => bail!("unknown module '{}'; built-ins: sdl, linalg", other),
-        }
-    }
-
-    fn import_args(&mut self) -> Value {
-        let mut obj = HashMap::new();
-        // properties
-        let script = self.cli_script.clone().unwrap_or_default();
-        obj.insert("script".to_string(), Value::Str(script.clone()));
-        let args_arr = Value::Array(self.cli_args.iter().cloned().map(Value::Str).collect());
-        obj.insert("args".to_string(), args_arr);
-        let mut all_vec: Vec<Value> = Vec::new();
-        if !script.is_empty() {
-            all_vec.push(Value::Str(script));
-        }
-        for a in &self.cli_args {
-            all_vec.push(Value::Str(a.clone()));
-        }
-        obj.insert("all".to_string(), Value::Array(all_vec));
-        // methods
-        obj.insert("len".into(), Value::FuncRef("args_len".into()));
-        obj.insert("get".into(), Value::FuncRef("args_get".into()));
-        obj.insert("has".into(), Value::FuncRef("args_has".into()));
-        obj.insert("value".into(), Value::FuncRef("args_value".into()));
-        obj.insert("parse_int".into(), Value::FuncRef("args_parse_int".into()));
-        Value::Object(obj)
-    }
-
-    fn import_sdl(&mut self) -> Value {
-        let mut obj = HashMap::new();
-        #[cfg(not(feature = "sdl3"))]
-        {
-            // Provide a one-time notice that this build is headless for SDL.
-            if !self.modules.contains_key("__sdl_notice_shown") {
-                eprintln!("[TONG][SDL] Built without 'sdl3' feature: using headless shim (no real window). Rebuild with --features sdl3 for graphics.");
-                self.modules
-                    .insert("__sdl_notice_shown".to_string(), Value::Bool(true));
-            }
-        }
-        // constants
-        obj.insert("K_ESCAPE".to_string(), Value::Int(27));
-        obj.insert("K_Q".to_string(), Value::Int(81));
-        obj.insert("K_W".to_string(), Value::Int(87));
-        obj.insert("K_S".to_string(), Value::Int(83));
-        obj.insert("K_UP".to_string(), Value::Int(1000));
-        obj.insert("K_DOWN".to_string(), Value::Int(1001));
-        // functions (method names map to builtin function identifiers)
-        obj.insert("init".into(), Value::FuncRef("sdl_init".into()));
-        obj.insert(
-            "create_window".into(),
-            Value::FuncRef("sdl_create_window".into()),
-        );
-        obj.insert(
-            "create_renderer".into(),
-            Value::FuncRef("sdl_create_renderer".into()),
-        );
-        obj.insert(
-            "set_draw_color".into(),
-            Value::FuncRef("sdl_set_draw_color".into()),
-        );
-        obj.insert("clear".into(), Value::FuncRef("sdl_clear".into()));
-        obj.insert("fill_rect".into(), Value::FuncRef("sdl_fill_rect".into()));
-        obj.insert("present".into(), Value::FuncRef("sdl_present".into()));
-        obj.insert("delay".into(), Value::FuncRef("sdl_delay".into()));
-        obj.insert("poll_quit".into(), Value::FuncRef("sdl_poll_quit".into()));
-        obj.insert("key_down".into(), Value::FuncRef("sdl_key_down".into()));
-        obj.insert(
-            "destroy_renderer".into(),
-            Value::FuncRef("sdl_destroy_renderer".into()),
-        );
-        obj.insert(
-            "destroy_window".into(),
-            Value::FuncRef("sdl_destroy_window".into()),
-        );
-        obj.insert("quit".into(), Value::FuncRef("sdl_quit".into()));
-        Value::Object(obj)
-    }
-
-    fn call_sdl_builtin(&mut self, name: &str, args: Vec<Expr>) -> Result<Value> {
-        #[cfg(feature = "sdl3")]
-        {
-            self.call_sdl_builtin_real(name, args)
-        }
-        #[cfg(not(feature = "sdl3"))]
-        {
-            match name {
-                "sdl_init" => Ok(Value::Int(0)),
-                "sdl_create_window" => Ok(Value::Int(1)),
-                "sdl_create_renderer" => Ok(Value::Int(1)),
-                "sdl_set_draw_color" => Ok(Value::Int(0)),
-                "sdl_clear" => Ok(Value::Int(0)),
-                "sdl_fill_rect" => Ok(Value::Int(0)),
-                "sdl_present" => Ok(Value::Int(0)),
-                "sdl_delay" => {
-                    // Simulate ~60 FPS by increasing frame count; no sleeping for CI speed
-                    let _ = args; // ignore actual ms
-                    self.sdl_frame += 1;
-                    Ok(Value::Int(0))
-                }
-                "sdl_poll_quit" => {
-                    let quit = self.sdl_frame >= 300; // auto-quit after ~300 frames
-                    Ok(Value::Bool(quit))
-                }
-                "sdl_key_down" => Ok(Value::Bool(false)),
-                "sdl_destroy_renderer" => Ok(Value::Int(0)),
-                "sdl_destroy_window" => Ok(Value::Int(0)),
-                "sdl_quit" => Ok(Value::Int(0)),
-                other => bail!("unknown SDL builtin {}", other),
-            }
-        }
-    }
 }
-
-#[cfg(feature = "sdl3")]
-struct SdlState {
-    _sdl: sdl3::Sdl,
-    video: sdl3::VideoSubsystem,
-    window: Option<sdl3::video::Window>,
-    canvas: Option<sdl3::render::Canvas<sdl3::video::Window>>,
-    events: sdl3::EventPump,
-    draw_color: (u8, u8, u8, u8),
-}
-
-#[cfg(feature = "sdl3")]
-impl Env {
-    fn sdl_state_mut(&mut self) -> Result<&mut SdlState> {
-        if self.sdl.is_none() {
-            let sdl = sdl3::init().map_err(|e| anyhow!(e))?;
-            let video = sdl.video().map_err(|e| anyhow!(e))?;
-            let events = sdl.event_pump().map_err(|e| anyhow!(e))?;
-            self.sdl = Some(SdlState {
-                _sdl: sdl,
-                video,
-                window: None,
-                canvas: None,
-                events,
-                draw_color: (0, 0, 0, 255),
-            });
-        }
-        Ok(self.sdl.as_mut().unwrap())
-    }
-
-    fn call_sdl_builtin_real(&mut self, name: &str, args: Vec<Expr>) -> Result<Value> {
-        use sdl3::{event::Event, keyboard::Scancode, pixels::Color, rect::Rect};
-        match name {
-            "sdl_init" => {
-                let _ = self.sdl_state_mut()?; // ensure initialized
-                Ok(Value::Int(0))
-            }
-            "sdl_create_window" => {
-                // evaluate arguments first to avoid borrow conflicts
-                let title = match args.first().map(|e| self.eval_expr(e.clone())) {
-                    Some(Ok(Value::Str(s))) => s,
-                    _ => "TONG".to_string(),
-                };
-                let w = match args.get(1).map(|e| self.eval_expr(e.clone())) {
-                    Some(Ok(Value::Int(i))) => i as u32,
-                    _ => 800,
-                };
-                let h = match args.get(2).map(|e| self.eval_expr(e.clone())) {
-                    Some(Ok(Value::Int(i))) => i as u32,
-                    _ => 600,
-                };
-                let state = self.sdl_state_mut()?;
-                let window = state
-                    .video
-                    .window(&title, w, h)
-                    .position_centered()
-                    .build()
-                    .map_err(|e| anyhow!(e))?;
-                state.window = Some(window);
-                Ok(Value::Int(1))
-            }
-            "sdl_create_renderer" => {
-                let state = self.sdl_state_mut()?;
-                let window = state
-                    .window
-                    .take()
-                    .ok_or_else(|| anyhow!("create_renderer: window not created"))?;
-                // sdl3 API: into_canvas() returns a Canvas directly (no builder chain)
-                let canvas = window.into_canvas();
-                state.canvas = Some(canvas);
-                Ok(Value::Int(1))
-            }
-            "sdl_set_draw_color" => {
-                let (r, g, b, a) = (
-                    self.eval_expr(args[1].clone())?.as_int_u8()?,
-                    self.eval_expr(args[2].clone())?.as_int_u8()?,
-                    self.eval_expr(args[3].clone())?.as_int_u8()?,
-                    self.eval_expr(args[4].clone())?.as_int_u8()?,
-                );
-                let state = self.sdl_state_mut()?;
-                let canvas = state
-                    .canvas
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("renderer not created"))?;
-                canvas.set_draw_color(Color::RGBA(r, g, b, a));
-                state.draw_color = (r, g, b, a);
-                Ok(Value::Int(0))
-            }
-            "sdl_clear" => {
-                let state = self.sdl_state_mut()?;
-                let canvas = state
-                    .canvas
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("renderer not created"))?;
-                canvas.clear();
-                Ok(Value::Int(0))
-            }
-            "sdl_fill_rect" => {
-                // args: (ren, x,y,w,h, r,g,b,a)
-                let x = self.eval_expr(args[1].clone())?.as_int_i32()?;
-                let y = self.eval_expr(args[2].clone())?.as_int_i32()?;
-                let w = self.eval_expr(args[3].clone())?.as_int_u32()?;
-                let h = self.eval_expr(args[4].clone())?.as_int_u32()?;
-                let (r, g, b, a) = (
-                    self.eval_expr(args[5].clone())?.as_int_u8()?,
-                    self.eval_expr(args[6].clone())?.as_int_u8()?,
-                    self.eval_expr(args[7].clone())?.as_int_u8()?,
-                    self.eval_expr(args[8].clone())?.as_int_u8()?,
-                );
-                let state = self.sdl_state_mut()?;
-                let canvas = state
-                    .canvas
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("renderer not created"))?;
-                let prev = state.draw_color;
-                canvas.set_draw_color(Color::RGBA(r, g, b, a));
-                canvas.fill_rect(Rect::new(x, y, w, h)).ok();
-                canvas.set_draw_color(Color::RGBA(prev.0, prev.1, prev.2, prev.3));
-                Ok(Value::Int(0))
-            }
-            "sdl_present" => {
-                let state = self.sdl_state_mut()?;
-                let canvas = state
-                    .canvas
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("renderer not created"))?;
-                canvas.present();
-                Ok(Value::Int(0))
-            }
-            "sdl_delay" => {
-                let ms = match args.first().map(|e| self.eval_expr(e.clone())) {
-                    Some(Ok(Value::Int(i))) => i,
-                    _ => 16,
-                };
-                std::thread::sleep(Duration::from_millis(ms as u64));
-                Ok(Value::Int(0))
-            }
-            "sdl_poll_quit" => {
-                let state = self.sdl_state_mut()?;
-                let mut quit = false;
-                for event in state.events.poll_iter() {
-                    if let Event::Quit { .. } = event {
-                        quit = true;
-                        break;
-                    }
-                }
-                Ok(Value::Bool(quit))
-            }
-            "sdl_key_down" => {
-                let code = match args.first().map(|e| self.eval_expr(e.clone())) {
-                    Some(Ok(Value::Int(i))) => i,
-                    _ => 0,
-                };
-                let state = self.sdl_state_mut()?;
-                let kb = state.events.keyboard_state();
-                let pressed = match code {
-                    27 => kb.is_scancode_pressed(Scancode::Escape),
-                    81 => kb.is_scancode_pressed(Scancode::Q),
-                    87 => kb.is_scancode_pressed(Scancode::W),
-                    83 => kb.is_scancode_pressed(Scancode::S),
-                    1000 => kb.is_scancode_pressed(Scancode::Up),
-                    1001 => kb.is_scancode_pressed(Scancode::Down),
-                    _ => false,
-                };
-                Ok(Value::Bool(pressed))
-            }
-            "sdl_destroy_renderer" => {
-                let state = self.sdl_state_mut()?;
-                let _ = args; // ignore handle
-                state.canvas = None;
-                Ok(Value::Int(0))
-            }
-            "sdl_destroy_window" => {
-                let state = self.sdl_state_mut()?;
-                let _ = args; // ignore handle
-                state.window = None;
-                Ok(Value::Int(0))
-            }
-            "sdl_quit" => {
-                // Drop everything
-                if let Some(st) = self.sdl.as_mut() {
-                    st.window = None;
-                }
-                Ok(Value::Int(0))
-            }
-            other => bail!("unknown SDL builtin {}", other),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

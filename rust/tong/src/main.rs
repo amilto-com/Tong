@@ -8,6 +8,10 @@ mod value;
 mod env;
 mod builtins;
 mod repl;
+mod args;
+mod sdl;
+mod linalg;
+
 use runtime::{builtin_functions, builtin_modules, Repl};
 
 #[derive(Parser)]
