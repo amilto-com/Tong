@@ -1,0 +1,27 @@
+let args = import("args")
+
+fn fib2(n) {
+    if n == 0 { return [0, 1] }
+    let p = fib2(n >> 1)
+    let a = p[0]
+    let b = p[1]
+    let c = a * (2*b - a)
+    let d = a*a + b*b
+    if (n & 1) == 0 { [c, d] } else { [d, c + d] }
+}
+
+fn fib_fast(n) { fib2(n)[0] }
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 45 }
+    }
+    let t0 = now_ms()
+    let r = fib_fast(n)
+    let t1 = now_ms()
+    print("fib_fast(", n, ")=", r, " time_ms=", (t1 - t0))
+}
+
+main()

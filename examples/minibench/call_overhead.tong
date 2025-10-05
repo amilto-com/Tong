@@ -1,0 +1,22 @@
+let args = import("args")
+
+fn inc(x) { x + 1 }
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 2000000 }
+    }
+    let t0 = now_ms()
+    var s = 0
+    var i = 0
+    while i < n {
+        s = inc(s)
+        i = i + 1
+    }
+    let t1 = now_ms()
+    print("call_overhead s=", s, " time_ms=", (t1 - t0))
+}
+
+main()

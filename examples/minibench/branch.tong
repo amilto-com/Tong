@@ -1,0 +1,20 @@
+let args = import("args")
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 3000000 }
+    }
+    let t0 = now_ms()
+    var m = 0
+    var i = 0
+    while i < n {
+        if (i & 1) == 0 { m = m + 1 } else { m = m - 1 }
+        i = i + 1
+    }
+    let t1 = now_ms()
+    print("branch m=", m, " time_ms=", (t1 - t0))
+}
+
+main()

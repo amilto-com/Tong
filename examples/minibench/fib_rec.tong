@@ -1,0 +1,20 @@
+let args = import("args")
+
+fn fib_rec(n) {
+    if n <= 1 { return n }
+    fib_rec(n-1) + fib_rec(n-2)
+}
+
+fn main() {
+    let n = {
+        let a = args.get(0)
+        let v = args.parse_int(a)
+        if v > 0 { v } else { 28 }
+    }
+    let t0 = now_ms()
+    let r = fib_rec(n)
+    let t1 = now_ms()
+    print("fib_rec(", n, ")=", r, " time_ms=", (t1 - t0))
+}
+
+main()
