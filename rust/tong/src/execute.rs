@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 
 use crate::value::Value;
 
-use crate::parser::{Expr, Pattern, Stmt, TypeAnn, Program, BinOp};
+use crate::parser::{Expr, Pattern, Stmt, TypeAnn, Program};
 use crate::env::Env;
 use crate::value::format_value;
 

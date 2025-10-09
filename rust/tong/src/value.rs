@@ -20,6 +20,7 @@ pub enum Value {
         name: String,
         applied: Vec<Value>,
     },
+    Tensor(Vec<f64>, Vec<usize>),
 }
 
 // Helper conversions for Value to numeric types (only needed when SDL backend active)
@@ -80,5 +81,6 @@ pub fn format_value(v: &Value) -> String {
             }
         }
         Value::Partial { name, applied } => format!("<partial:{}:{}>", name, applied.len()),
+        Value::Tensor(data, dims) => format!("tensor({:?}, {:?})", data, dims),
     }
 }

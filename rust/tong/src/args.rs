@@ -30,64 +30,51 @@ impl Env {
 
     pub fn call_args_builtin_values(&mut self, name: &str, values: Vec<Value>) -> Result<Value> {
         match name {
+            "args_script" => Ok(Value::Str(self.cli_script.clone().unwrap_or_default())),
             "args_len" => Ok(Value::Int(self.cli_args.len() as i64)),
-            "args_get" => {
-                if values.len() != 1 {
-                    bail!("args.get expects 1 argument");
-                }
-                if let Value::Int(i) = values[0] {
-                    if i >= 0 && (i as usize) < self.cli_args.len() {
-                        Ok(Value::Str(self.cli_args[i as usize].clone()))
-                    } else {
-                        Ok(Value::Str("".to_string()))
-                    }
-                } else {
-                    bail!("args.get expects int index");
-                }
-            }
+            "args_all" => Ok(Value::Array(self.cli_args.iter().map(|s| Value::Str(s.clone())).collect())),
             "args_has" => {
                 if values.len() != 1 {
                     bail!("args.has expects 1 argument");
                 }
-                if let Value::Str(s) = &values[0] {
-                    Ok(Value::Bool(self.cli_args.contains(s)))
-                } else {
-                    bail!("args.has expects string");
+                match &values[0] {
+                    Value::Str(flag) => Ok(Value::Bool(self.cli_args.contains(flag))),
+                    _ => bail!("args.has expects string"),
                 }
             }
             "args_value" => {
                 if values.len() != 1 {
                     bail!("args.value expects 1 argument");
                 }
-                if let Value::Str(s) = &values[0] {
-                    if let Some(pos) = self.cli_args.iter().position(|a| a == s) {
-                        if pos + 1 < self.cli_args.len() {
-                            Ok(Value::Str(self.cli_args[pos + 1].clone()))
-                        } else {
-                            Ok(Value::Str("".to_string()))
+                match &values[0] {
+                    Value::Str(key) => {
+                        for arg in &self.cli_args {
+                            if arg.starts_with(&format!("{}=", key)) {
+                                return Ok(Value::Str(arg[key.len() + 1..].to_string()));
+                            }
                         }
-                    } else {
-                        Ok(Value::Str("".to_string()))
+                        Ok(Value::Str(String::new()))
                     }
-                } else {
-                    bail!("args.value expects string");
+                    _ => bail!("args.value expects string"),
                 }
             }
-            "args_parse_int" => {
+            "args_get" => {
                 if values.len() != 1 {
-                    bail!("args.parse_int expects 1 argument");
+                    bail!("args.get expects 1 argument");
                 }
-                if let Value::Str(s) = &values[0] {
-                    if let Ok(i) = s.parse::<i64>() {
-                        Ok(Value::Int(i))
-                    } else {
-                        Ok(Value::Int(0))
+                match &values[0] {
+                    Value::Int(idx) if *idx >= 0 => {
+                        let i = *idx as usize;
+                        if i < self.cli_args.len() {
+                            Ok(Value::Str(self.cli_args[i].clone()))
+                        } else {
+                            Ok(Value::Str(String::new()))
+                        }
                     }
-                } else {
-                    bail!("args.parse_int expects string");
+                    _ => bail!("args.get expects non-negative integer"),
                 }
             }
-            _ => bail!("unknown args builtin {}", name),
+            _ => bail!("unknown args function {}", name),
         }
     }
 }

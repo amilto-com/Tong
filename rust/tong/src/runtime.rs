@@ -1,14 +1,13 @@
-use anyhow::Result;
+// Runtime module - re-exports public APIs
 
-use crate::parser::{Expr, Pattern, Stmt, TypeAnn, Program};
-
-pub use crate::value::*;
-pub use crate::env::*;
 pub use crate::repl::*;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use anyhow::Result;
+    use crate::env::Env;
+    use crate::parser::Stmt;
+    use crate::value::format_value;
     use crate::lexer::lex;
     use crate::parser::parse as parse_prog;
 

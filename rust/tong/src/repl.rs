@@ -4,7 +4,6 @@ use crate::env::Env;
 use crate::lexer::lex;
 use crate::parser::{parse, Stmt};
 use crate::value::Value;
-use rustyline::{Editor, Result as RustyResult};
 
 fn format_value(v: &Value) -> String {
     match v {
@@ -41,6 +40,7 @@ fn format_value(v: &Value) -> String {
             }
         }
         Value::Partial { name, applied } => format!("<partial:{}:{}>", name, applied.len()),
+        Value::Tensor(data, dims) => format!("tensor({:?}, {:?})", data, dims),
     }
 }
 
