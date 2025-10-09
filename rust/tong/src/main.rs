@@ -13,6 +13,7 @@ mod repl;
 mod args;
 mod sdl;
 mod linalg;
+mod wasm_backend;
 
 use execute::{builtin_functions, builtin_modules, execute_with_cli};
 use runtime::Repl;
@@ -45,6 +46,15 @@ struct Cli {
     /// Print explicit exit status line on completion
     #[arg(long)]
     show_exit: bool,
+    /// Compile to WASM instead of executing (outputs .wasm file)
+    #[arg(long)]
+    wasm: bool,
+    /// Compile to WAT (WebAssembly Text format) instead of executing
+    #[arg(long)]
+    wat: bool,
+    /// Output file for WASM/WAT compilation (default: <input>.wasm or <input>.wat)
+    #[arg(short, long)]
+    output: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -81,8 +91,36 @@ fn main() -> anyhow::Result<()> {
             let src = fs::read_to_string(&file)?;
             let tokens = lexer::lex(&src)?;
             let program = parser::parse(tokens)?;
-            // Propagate script path and CLI args into runtime ENV via globals
-            execute_with_cli(program, cli.debug, Some(file), cli.script_args)?;
+            
+            // Handle WASM/WAT compilation
+            if cli.wasm || cli.wat {
+                let output_path = if let Some(out) = cli.output {
+                    out
+                } else {
+                    let base = file.trim_end_matches(".tong");
+                    if cli.wat {
+                        format!("{}.wat", base)
+                    } else {
+                        format!("{}.wasm", base)
+                    }
+                };
+
+                if cli.wat {
+                    // Compile to WAT
+                    let wat = wasm_backend::compile_to_wat(&program)?;
+                    fs::write(&output_path, wat)?;
+                    println!("Compiled to WAT: {}", output_path);
+                } else {
+                    // Compile to WASM
+                    let wasm = wasm_backend::compile_to_wasm(&program)?;
+                    fs::write(&output_path, wasm)?;
+                    println!("Compiled to WASM: {}", output_path);
+                }
+            } else {
+                // Normal execution
+                // Propagate script path and CLI args into runtime ENV via globals
+                execute_with_cli(program, cli.debug, Some(file), cli.script_args)?;
+            }
             Ok(())
         })();
         match result {

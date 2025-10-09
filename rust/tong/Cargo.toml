@@ -13,6 +13,10 @@ logos = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rustyline = "12.0"
+# WASM backend dependencies
+wasmparser = "0.121"
+wasm-encoder = "0.221"
+wasmprinter = "0.221"
 [dependencies.sdl3]
 version = "0.15.1"
 features = ["build-from-source"]

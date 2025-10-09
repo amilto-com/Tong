@@ -1,0 +1,15 @@
+// Simple WASM test program
+let x = 42
+let y = 10
+
+fn add(a, b) {
+    a + b
+}
+
+fn multiply(a, b) {
+    a * b
+}
+
+print(x + y)
+print(add(5, 7))
+print(multiply(6, 7))

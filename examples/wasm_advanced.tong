@@ -1,0 +1,47 @@
+// Advanced WASM example - Mathematical computations
+// Demonstrates functions, complex arithmetic, and bitwise operations
+
+fn square(x) {
+    x * x
+}
+
+fn cube(x) {
+    x * x * x
+}
+
+fn sum_of_squares(a, b) {
+    square(a) + square(b)
+}
+
+fn pythagorean(a, b) {
+    sum_of_squares(a, b)
+}
+
+fn power_of_two(n) {
+    n * n
+}
+
+// Test calculations
+print(square(5))           // 25
+print(cube(3))             // 27
+print(pythagorean(3, 4))   // 25 (3² + 4² = 9 + 16)
+print(power_of_two(8))     // 64
+
+// Bitwise operations
+let a = 12
+let b = 5
+
+print(a & b)    // 4 (1100 & 0101 = 0100)
+print(a | b)    // 13 (1100 | 0101 = 1101)
+print(a ^ b)    // 9 (1100 ^ 0101 = 1001)
+print(a << 2)   // 48 (1100 << 2 = 110000)
+print(b >> 1)   // 2 (0101 >> 1 = 0010)
+
+// Comparison chains
+let x = 10
+let y = 20
+let z = 30
+
+print((x < y) && (y < z))  // 1 (true)
+print((x > y) || (y < z))  // 1 (true)
+print((x == y) || (y == z)) // 0 (false)

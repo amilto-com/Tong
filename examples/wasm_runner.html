@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tong WASM Runner</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+        }
+        #output {
+            background-color: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 15px;
+            min-height: 200px;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 2px 5px;
+        }
+        .log-i32 { color: #4fc1ff; }
+        .log-i64 { color: #ce9178; }
+        .log-f64 { color: #b5cea8; }
+        button {
+            background-color: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background-color: #1177bb;
+        }
+        .info {
+            background-color: #252526;
+            border-left: 3px solid #4ec9b0;
+            padding: 10px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Tong WASM Runner</h1>
+    
+    <div class="info">
+        <strong>Status:</strong> <span id="status">Loading WASM module...</span>
+    </div>
+
+    <button onclick="runWasm()">▶️ Run WASM</button>
+    <button onclick="clearOutput()">🗑️ Clear Output</button>
+    
+    <h2>Output:</h2>
+    <div id="output"></div>
+
+    <script>
+        const outputDiv = document.getElementById('output');
+        const statusSpan = document.getElementById('status');
+        
+        let wasmInstance = null;
+
+        function addOutput(text, className = '') {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + className;
+            entry.textContent = text;
+            outputDiv.appendChild(entry);
+        }
+
+        function clearOutput() {
+            outputDiv.innerHTML = '';
+        }
+
+        // Import functions that WASM can call
+        const importObject = {
+            env: {
+                print_i32: (value) => {
+                    addOutput(`i32: ${value}`, 'log-i32');
+                },
+                print_i64: (value) => {
+                    addOutput(`i64: ${value}`, 'log-i64');
+                },
+                print_f64: (value) => {
+                    addOutput(`f64: ${value}`, 'log-f64');
+                }
+            }
+        };
+
+        // Load WASM module
+        async function loadWasm() {
+            try {
+                const response = await fetch('wasm_test.wasm');
+                const bytes = await response.arrayBuffer();
+                const result = await WebAssembly.instantiate(bytes, importObject);
+                wasmInstance = result.instance;
+                statusSpan.textContent = 'Ready! Click "Run WASM" to execute.';
+                statusSpan.style.color = '#4ec9b0';
+                addOutput('✅ WASM module loaded successfully!');
+            } catch (error) {
+                statusSpan.textContent = 'Error loading WASM';
+                statusSpan.style.color = '#f48771';
+                addOutput(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        function runWasm() {
+            if (!wasmInstance) {
+                addOutput('⚠️  WASM module not loaded yet!');
+                return;
+            }
+            
+            clearOutput();
+            addOutput('🚀 Executing Tong WASM...\n');
+            
+            try {
+                wasmInstance.exports.main();
+                addOutput('\n✅ Execution completed successfully!');
+            } catch (error) {
+                addOutput(`\n❌ Runtime error: ${error.message}`);
+            }
+        }
+
+        // Load WASM on page load
+        loadWasm();
+    </script>
+</body>
+</html>
