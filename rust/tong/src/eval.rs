@@ -1572,6 +1572,7 @@ fn expr_from_value(v: &Value) -> Expr {
         Value::Object(_) => Expr::Ident("<object>".to_string()),
         Value::Constructor { name, .. } => Expr::Ident(name.clone()),
         Value::Partial { name, .. } => Expr::Ident(name.clone()),
+        Value::Tensor(_, _) => Expr::Ident("<tensor>".to_string()),
     }
 }
 
