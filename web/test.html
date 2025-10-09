@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tong WASM Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        pre {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .error { color: #f48771; }
+        .success { color: #4ec9b0; }
+    </style>
+</head>
+<body>
+    <h1>Tong WASM Debug Test</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        import init, { TongRepl } from './tong.js';
+        
+        const output = document.getElementById('output');
+        
+        function log(msg, isError = false) {
+            const pre = document.createElement('pre');
+            pre.className = isError ? 'error' : 'success';
+            pre.textContent = msg;
+            output.appendChild(pre);
+        }
+        
+        async function test() {
+            try {
+                log('1. Initializing WASM...');
+                await init();
+                log('✓ WASM initialized');
+                
+                log('\n2. Creating TongRepl instance...');
+                const repl = new TongRepl();
+                log('✓ TongRepl created');
+                
+                // Test 1: Simple expression
+                log('\n3. Testing: 1+1');
+                const result1 = repl.eval('1+1');
+                log(`   Result: "${result1}" (type: ${typeof result1}, length: ${result1.length})`);
+                
+                // Test 2: Variable assignment
+                log('\n4. Testing: let x = 42');
+                const result2 = repl.eval('let x = 42');
+                log(`   Result: "${result2}" (type: ${typeof result2}, length: ${result2.length})`);
+                
+                // Test 3: Variable reference
+                log('\n5. Testing: x');
+                const result3 = repl.eval('x');
+                log(`   Result: "${result3}" (type: ${typeof result3}, length: ${result3.length})`);
+                
+                // Test 4: Print statement
+                log('\n6. Testing: print("hello", 123)');
+                const result4 = repl.eval('print("hello", 123)');
+                log(`   Result: "${result4}" (type: ${typeof result4}, length: ${result4.length})`);
+                
+                // Test 5: Error handling
+                log('\n7. Testing error: invalid syntax');
+                try {
+                    const result5 = repl.eval('invalid @@@ syntax');
+                    log(`   Result: "${result5}"`, true);
+                } catch (e) {
+                    log(`   ✓ Error caught: ${e}`, false);
+                }
+                
+                log('\n✓ All tests completed!');
+                
+            } catch (error) {
+                log(`✗ Test failed: ${error}`, true);
+                console.error(error);
+            }
+        }
+        
+        test();
+    </script>
+</body>
+</html>

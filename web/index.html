@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tong REPL - WebAssembly</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 20px;
+            font-size: 2em;
+        }
+        
+        .repl-container {
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        #output {
+            height: 400px;
+            overflow-y: auto;
+            padding: 15px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            background: #1e1e1e;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        
+        .output-line {
+            margin: 4px 0;
+        }
+        
+        .output-prompt {
+            color: #4ec9b0;
+        }
+        
+        .output-result {
+            color: #ce9178;
+        }
+        
+        .output-error {
+            color: #f48771;
+        }
+        
+        .input-container {
+            display: flex;
+            padding: 15px;
+            background: #252526;
+        }
+        
+        .prompt {
+            color: #4ec9b0;
+            margin-right: 10px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            line-height: 36px;
+        }
+        
+        #input {
+            flex: 1;
+            background: #3c3c3c;
+            border: 1px solid #4ec9b0;
+            color: #d4d4d4;
+            padding: 8px 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+        }
+        
+        #input:focus {
+            border-color: #569cd6;
+            box-shadow: 0 0 0 2px rgba(86, 156, 214, 0.3);
+        }
+        
+        .examples {
+            margin-top: 20px;
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .examples h2 {
+            color: #569cd6;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .example {
+            background: #1e1e1e;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 3px solid #4ec9b0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .example:hover {
+            border-left-color: #569cd6;
+            background: #2d2d30;
+        }
+        
+        .example-title {
+            color: #4ec9b0;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .example-code {
+            color: #ce9178;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #569cd6;
+        }
+        
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #1177bb;
+        }
+        
+        button:active {
+            background: #0d5a8f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Tong REPL - WebAssembly Edition</h1>
+        
+        <div class="repl-container">
+            <div id="output"></div>
+            <div class="input-container">
+                <span class="prompt">tong&gt;</span>
+                <input type="text" id="input" placeholder="Enter Tong code here..." autofocus>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button onclick="clearOutput()">Clear Output</button>
+            <button onclick="showHelp()">Help</button>
+        </div>
+        
+        <div class="examples">
+            <h2>Examples - Click to run</h2>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">Hello World</div>
+                <div class="example-code">print("Hello from Tong WASM!")</div>
+            </div>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">Simple Math</div>
+                <div class="example-code">10 + 32</div>
+            </div>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">Variables</div>
+                <div class="example-code">let x = 42</div>
+            </div>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">Lambda Functions</div>
+                <div class="example-code">let sq = |n| n * n</div>
+            </div>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">List Comprehension</div>
+                <div class="example-code">[ x*x | x in [1,2,3,4,5] ]</div>
+            </div>
+            
+            <div class="example" onclick="runExample(this)">
+                <div class="example-title">String Concatenation</div>
+                <div class="example-code">"Hello, " ++ "World!"</div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import init, { TongRepl } from './tong.js';
+        
+        let repl = null;
+        const output = document.getElementById('output');
+        const input = document.getElementById('input');
+        
+        function addOutput(text, className = '') {
+            const div = document.createElement('div');
+            div.className = `output-line ${className}`;
+            div.textContent = text;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        window.clearOutput = function() {
+            output.innerHTML = '';
+        };
+        
+        window.showHelp = function() {
+            addOutput('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'output-result');
+            addOutput('Tong REPL Commands:', 'output-result');
+            addOutput('  • Type expressions and press Enter to evaluate', 'output-result');
+            addOutput('  • Click examples to run them', 'output-result');
+            addOutput('  • Clear Output - clears the console', 'output-result');
+            addOutput('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'output-result');
+        };
+        
+        window.runExample = function(element) {
+            const code = element.querySelector('.example-code').textContent;
+            input.value = code;
+            evalCode(code);
+        };
+        
+        function evalCode(code) {
+            if (!repl) {
+                addOutput('Error: REPL not initialized', 'output-error');
+                return;
+            }
+            
+            addOutput(`tong> ${code}`, 'output-prompt');
+            
+            try {
+                const result = repl.eval(code);
+                if (result !== undefined && result !== null) {
+                    const trimmed = String(result).trim();
+                    if (trimmed) {
+                        addOutput(trimmed, 'output-result');
+                    }
+                }
+            } catch (error) {
+                const errorMsg = error.toString();
+                addOutput(errorMsg, 'output-error');
+            }
+        }
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const code = input.value.trim();
+                if (code) {
+                    evalCode(code);
+                    input.value = '';
+                }
+            }
+        });
+        
+        // Initialize WASM
+        addOutput('Loading Tong WASM runtime...', 'output-result');
+        
+        try {
+            await init();
+            repl = new TongRepl();
+            addOutput('✓ Tong WASM runtime loaded successfully!', 'output-result');
+            addOutput('Type Tong code or click an example to get started.', 'output-result');
+            addOutput('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'output-result');
+        } catch (error) {
+            addOutput('✗ Failed to load WASM: ' + error, 'output-error');
+            console.error('WASM init error:', error);
+        }
+    </script>
+</body>
+</html>

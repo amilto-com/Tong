@@ -7,25 +7,42 @@ build = "build.rs"
 [dependencies]
 anyhow = "1"
 thiserror = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 # Use logos 0.12 for simpler error handling with an Error variant
 logos = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rustyline = "12.0"
+rustyline = { version = "12.0", optional = true }
 # WASM backend dependencies
 wasmparser = "0.121"
 wasm-encoder = "0.221"
 wasmprinter = "0.221"
+# WASM bindings (only for wasm32 target)
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
 [dependencies.sdl3]
 version = "0.15.1"
 features = ["build-from-source"]
 optional = true
 
+[lib]
+name = "tong"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "tong"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [features]
-default = []
+default = ["cli"]
+cli = ["dep:clap", "dep:rustyline"]
 # Enable a real SDL3 window/rendering backend instead of the headless shim
 sdl3 = ["dep:sdl3"]
+# Enable WASM bindings for browser usage
+wasm = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
 
 [dev-dependencies]
 tempfile = "3"
