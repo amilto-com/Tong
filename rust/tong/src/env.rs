@@ -31,11 +31,11 @@ pub struct Env {
 }
 
 #[cfg(feature = "sdl3")]
-struct SdlState {
-    _sdl: sdl3::Sdl,
-    video: sdl3::VideoSubsystem,
+pub(crate) struct SdlState {
+    pub _sdl: sdl3::Sdl,
+    pub video: sdl3::VideoSubsystem,
     pub window: Option<sdl3::video::Window>,
-    canvas: Option<sdl3::render::Canvas<sdl3::video::Window>>,
-    events: sdl3::EventPump,
-    draw_color: (u8, u8, u8, u8),
+    pub canvas: Option<sdl3::render::Canvas<sdl3::video::Window>>,
+    pub events: sdl3::EventPump,
+    pub draw_color: (u8, u8, u8, u8),
 }

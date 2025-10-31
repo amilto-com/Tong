@@ -1,8 +1,8 @@
-
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
+use std::time::Duration;
 use crate::value::Value;
-use crate::env::Env;
+use crate::env::{Env, SdlState};
 use crate::parser::Expr;
 
 impl Env {
@@ -92,22 +92,12 @@ impl Env {
 }
 
 #[cfg(feature = "sdl3")]
-struct SdlState {
-    _sdl: sdl3::Sdl,
-    video: sdl3::VideoSubsystem,
-    window: Option<sdl3::video::Window>,
-    canvas: Option<sdl3::render::Canvas<sdl3::video::Window>>,
-    events: sdl3::EventPump,
-    draw_color: (u8, u8, u8, u8),
-}
-
-#[cfg(feature = "sdl3")]
 impl Env {
     fn sdl_state_mut(&mut self) -> Result<&mut SdlState> {
         if self.sdl.is_none() {
-            let sdl = sdl3::init().map_err(|e| anyhow!(e))?;
-            let video = sdl.video().map_err(|e| anyhow!(e))?;
-            let events = sdl.event_pump().map_err(|e| anyhow!(e))?;
+            let sdl = sdl3::init().map_err(|e: sdl3::Error| anyhow!(e))?;
+            let video = sdl.video().map_err(|e: sdl3::Error| anyhow!(e))?;
+            let events = sdl.event_pump().map_err(|e: sdl3::Error| anyhow!(e))?;
             self.sdl = Some(SdlState {
                 _sdl: sdl,
                 video,

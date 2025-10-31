@@ -5,8 +5,7 @@ use anyhow::{bail, Result};
 use std::collections::HashMap;
 use wasm_encoder::*;
 
-use crate::parser::{Expr, Stmt, BinOp, Pattern, TypeAnn, Program};
-use crate::value::Value;
+use crate::parser::{Expr, Stmt, BinOp, Program};
 
 /// WASM compiler context
 pub struct WasmCompiler {
@@ -174,7 +173,7 @@ impl WasmCompiler {
     }
 
     /// Compile a function definition
-    fn compile_function(&mut self, name: &str, params: &[String], body: &[Stmt]) -> Result<Function> {
+    fn compile_function(&mut self, _name: &str, params: &[String], body: &[Stmt]) -> Result<Function> {
         // Reset local context
         self.locals.clear();
         self.next_local = 0;
